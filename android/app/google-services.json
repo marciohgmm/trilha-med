@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "85490416984",
+    "project_id": "revalida-cards",
+    "storage_bucket": "revalida-cards.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:85490416984:android:95125e4d63cab2e2ae392d",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCv7lKrRe3YW7Ht4NR9I3YE7wrcycgrHHg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:85490416984:android:42ca629be67f42e6ae392d",
+        "android_client_info": {
+          "package_name": "com.revalida.cards"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCv7lKrRe3YW7Ht4NR9I3YE7wrcycgrHHg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
