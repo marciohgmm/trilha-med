@@ -28,12 +28,18 @@ class _PerfilPageState extends State<PerfilPage> {
 
   String _iniciais(String nome, String email) {
     final nomeLimpo = nome.trim();
+
     if (nomeLimpo.isNotEmpty) {
-      final partes = nomeLimpo.split(' ').where((e) => e.trim().isNotEmpty).toList();
+      final partes =
+          nomeLimpo.split(' ').where((e) => e.trim().isNotEmpty).toList();
+
       if (partes.length == 1) {
         return partes.first.substring(0, 1).toUpperCase();
       }
-      return (partes.first.substring(0, 1) + partes.last.substring(0, 1)).toUpperCase();
+
+      return (partes.first.substring(0, 1) +
+              partes.last.substring(0, 1))
+          .toUpperCase();
     }
 
     if (email.isNotEmpty) {
@@ -80,6 +86,7 @@ class _PerfilPageState extends State<PerfilPage> {
       );
     } finally {
       if (!mounted) return;
+
       setState(() {
         _salvando = false;
       });
@@ -93,7 +100,9 @@ class _PerfilPageState extends State<PerfilPage> {
       if (email == null || email.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Não foi possível identificar o e-mail do usuário.'),
+            content: Text(
+              'Não foi possível identificar o e-mail do usuário.',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -106,7 +115,9 @@ class _PerfilPageState extends State<PerfilPage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Enviamos o link de redefinição para $email'),
+          content: Text(
+            'Enviamos o link de redefinição para $email',
+          ),
           backgroundColor: Colors.green,
         ),
       );
@@ -115,7 +126,9 @@ class _PerfilPageState extends State<PerfilPage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Erro ao enviar redefinição de senha: $e'),
+          content: Text(
+            'Erro ao enviar redefinição de senha: $e',
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -164,19 +177,27 @@ class _PerfilPageState extends State<PerfilPage> {
                 if (mensagem.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Digite uma mensagem antes de enviar.'),
+                      content: Text(
+                        'Digite uma mensagem antes de enviar.',
+                      ),
                     ),
                   );
                   return;
                 }
 
                 try {
-                  await _firestore.collection('suporte_mensagens').add({
+                  /// CORRIGIDO:
+                  /// Agora envia para coleção usada pelo admin
+                  await _firestore
+                      .collection('notificacoes_admin')
+                      .add({
+                    'tipo': 'contato_admin',
+                    'status': 'novo',
                     'userId': widget.userId,
                     'email': _auth.currentUser?.email ?? '',
                     'mensagem': mensagem,
-                    'status': 'novo',
                     'criadoEm': Timestamp.now(),
+                    'atualizadoEm': Timestamp.now(),
                   });
 
                   if (!mounted) return;
@@ -185,7 +206,9 @@ class _PerfilPageState extends State<PerfilPage> {
 
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Mensagem enviada para a equipe com sucesso!'),
+                      content: Text(
+                        'Mensagem enviada para a equipe com sucesso!',
+                      ),
                       backgroundColor: Colors.green,
                     ),
                   );
@@ -194,7 +217,9 @@ class _PerfilPageState extends State<PerfilPage> {
 
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Erro ao enviar mensagem: $e'),
+                      content: Text(
+                        'Erro ao enviar mensagem: $e',
+                      ),
                       backgroundColor: Colors.red,
                     ),
                   );
@@ -215,6 +240,65 @@ class _PerfilPageState extends State<PerfilPage> {
     );
   }
 
+  Future<void> _abrirSobreApp() async {
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Text('Sobre o app'),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.school,
+                size: 52,
+                color: Color(0xFF1E3A8A),
+              ),
+              SizedBox(height: 14),
+              Text(
+                'Trilha Med',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Preparação Revalida',
+                textAlign: TextAlign.center,
+              ),
+              SizedBox(height: 12),
+              Text(
+                'Versão 1.0.0',
+                style: TextStyle(
+                  color: Colors.black54,
+                ),
+              ),
+              SizedBox(height: 12),
+              Text(
+                'Aplicativo desenvolvido para auxiliar estudantes com flashcards, estudos organizados e revisão inteligente.',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E3A8A),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Fechar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _confirmarLogout() async {
     final sair = await showDialog<bool>(
       context: context,
@@ -224,7 +308,9 @@ class _PerfilPageState extends State<PerfilPage> {
             borderRadius: BorderRadius.circular(20),
           ),
           title: const Text('Sair da conta'),
-          content: const Text('Tem certeza que deseja sair do aplicativo?'),
+          content: const Text(
+            'Tem certeza que deseja sair do aplicativo?',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -235,9 +321,6 @@ class _PerfilPageState extends State<PerfilPage> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
               ),
               child: const Text('Sair'),
             ),
@@ -282,7 +365,8 @@ class _PerfilPageState extends State<PerfilPage> {
         ],
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         leading: Container(
           width: 46,
           height: 46,
@@ -296,16 +380,13 @@ class _PerfilPageState extends State<PerfilPage> {
           titulo,
           style: const TextStyle(
             fontWeight: FontWeight.bold,
-            color: Color(0xFF111827),
           ),
         ),
-        subtitle: Text(
-          subtitulo,
-          style: const TextStyle(
-            color: Color(0xFF6B7280),
-          ),
+        subtitle: Text(subtitulo),
+        trailing: const Icon(
+          Icons.arrow_forward_ios,
+          size: 16,
         ),
-        trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Color(0xFF9CA3AF)),
         onTap: onTap,
       ),
     );
@@ -324,23 +405,14 @@ class _PerfilPageState extends State<PerfilPage> {
         keyboardType: keyboardType,
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: Icon(icon, color: const Color(0xFF1E3A8A)),
+          prefixIcon: Icon(
+            icon,
+            color: const Color(0xFF1E3A8A),
+          ),
           filled: true,
           fillColor: const Color(0xFFF8FAFC),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(
-              color: Color(0xFF1E3A8A),
-              width: 2,
-            ),
           ),
         ),
       ),
@@ -358,15 +430,23 @@ class _PerfilPageState extends State<PerfilPage> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
-      stream: _firestore.collection('users').doc(widget.userId).snapshots(),
+      stream: _firestore
+          .collection('users')
+          .doc(widget.userId)
+          .snapshots(),
       builder: (context, snapshot) {
         final rawData = snapshot.data?.data();
-        final userData = rawData is Map<String, dynamic> ? rawData : <String, dynamic>{};
+
+        final userData = rawData is Map<String, dynamic>
+            ? rawData
+            : <String, dynamic>{};
 
         final nome = (userData['nome'] ?? '').toString();
         final telefone = (userData['telefone'] ?? '').toString();
         final cidade = (userData['cidade'] ?? '').toString();
-        final email = (_auth.currentUser?.email ?? userData['email'] ?? '').toString();
+        final email =
+            (_auth.currentUser?.email ?? userData['email'] ?? '')
+                .toString();
 
         _nomeController.text = nome;
         _telefoneController.text = telefone;
@@ -379,19 +459,14 @@ class _PerfilPageState extends State<PerfilPage> {
               children: [
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                  padding:
+                      const EdgeInsets.fromLTRB(20, 20, 20, 32),
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
                         Color(0xFF1E3A8A),
                         Color(0xFF2563EB),
                       ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.only(
-                      bottomLeft: Radius.circular(28),
-                      bottomRight: Radius.circular(28),
                     ),
                   ),
                   child: Column(
@@ -415,35 +490,29 @@ class _PerfilPageState extends State<PerfilPage> {
                           ),
                           IconButton(
                             onPressed: _confirmarLogout,
-                            icon: const Icon(Icons.logout, color: Colors.white),
-                            tooltip: 'Sair',
+                            icon: const Icon(
+                              Icons.logout,
+                              color: Colors.white,
+                            ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 18),
-                      Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.22),
-                          shape: BoxShape.circle,
-                        ),
-                        child: CircleAvatar(
-                          radius: 38,
-                          backgroundColor: Colors.white,
-                          child: Text(
-                            _iniciais(nome, email),
-                            style: const TextStyle(
-                              color: Color(0xFF1E3A8A),
-                              fontSize: 26,
-                              fontWeight: FontWeight.bold,
-                            ),
+                      CircleAvatar(
+                        radius: 38,
+                        backgroundColor: Colors.white,
+                        child: Text(
+                          _iniciais(nome, email),
+                          style: const TextStyle(
+                            color: Color(0xFF1E3A8A),
+                            fontSize: 26,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ),
                       const SizedBox(height: 14),
                       Text(
                         nome.isNotEmpty ? nome : 'Aluno(a)',
-                        textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 22,
@@ -452,11 +521,11 @@ class _PerfilPageState extends State<PerfilPage> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        email.isNotEmpty ? email : 'Email não disponível',
-                        textAlign: TextAlign.center,
+                        email.isNotEmpty
+                            ? email
+                            : 'Email não disponível',
                         style: const TextStyle(
                           color: Color(0xFFE0E7FF),
-                          fontSize: 14,
                         ),
                       ),
                     ],
@@ -466,130 +535,80 @@ class _PerfilPageState extends State<PerfilPage> {
                   child: ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(22),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0x11000000),
-                              blurRadius: 16,
-                              offset: Offset(0, 8),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Atualizar cadastro',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF111827),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              'Mantenha seus dados sempre atualizados.',
-                              style: TextStyle(
-                                color: Color(0xFF6B7280),
-                              ),
-                            ),
-                            const SizedBox(height: 18),
-                            _buildCampo(
-                              controller: _nomeController,
-                              label: 'Nome',
-                              icon: Icons.person_outline,
-                            ),
-                            _buildCampo(
-                              controller: _telefoneController,
-                              label: 'Telefone',
-                              icon: Icons.phone_outlined,
-                              keyboardType: TextInputType.phone,
-                            ),
-                            _buildCampo(
-                              controller: _cidadeController,
-                              label: 'Cidade',
-                              icon: Icons.location_city_outlined,
-                            ),
-                            const SizedBox(height: 4),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                onPressed: _salvando ? null : _salvarPerfil,
-                                icon: _salvando
-                                    ? const SizedBox(
-                                        height: 18,
-                                        width: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2.2,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : const Icon(Icons.save_outlined),
-                                label: Text(_salvando ? 'Salvando...' : 'Salvar alterações'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF1E3A8A),
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                      _buildCampo(
+                        controller: _nomeController,
+                        label: 'Nome',
+                        icon: Icons.person_outline,
                       ),
-                      const SizedBox(height: 18),
-                      const Padding(
-                        padding: EdgeInsets.only(left: 4, bottom: 10),
-                        child: Text(
-                          'Conta e suporte',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF111827),
+                      _buildCampo(
+                        controller: _telefoneController,
+                        label: 'Telefone',
+                        icon: Icons.phone_outlined,
+                      ),
+                      _buildCampo(
+                        controller: _cidadeController,
+                        label: 'Cidade',
+                        icon: Icons.location_city_outlined,
+                      ),
+                      const SizedBox(height: 8),
+                      ElevatedButton(
+                        onPressed:
+                            _salvando ? null : _salvarPerfil,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              const Color(0xFF1E3A8A),
+                          foregroundColor: Colors.white,
+                          padding:
+                              const EdgeInsets.symmetric(
+                            vertical: 16,
                           ),
                         ),
+                        child: Text(
+                          _salvando
+                              ? 'Salvando...'
+                              : 'Salvar alterações',
+                        ),
                       ),
+                      const SizedBox(height: 24),
                       _buildAcaoTile(
                         icon: Icons.lock_reset,
                         titulo: 'Trocar senha',
-                        subtitulo: 'Enviar link de redefinição para o seu email',
+                        subtitulo:
+                            'Enviar link para seu e-mail',
                         onTap: _enviarRedefinicaoSenha,
                       ),
                       _buildAcaoTile(
                         icon: Icons.support_agent,
                         titulo: 'Falar com suporte',
-                        subtitulo: 'Relatar problema, dúvida ou sugestão',
+                        subtitulo:
+                            'Relatar problema, dúvida ou sugestão',
                         onTap: _abrirDialogoSuporte,
-                        corIcone: const Color(0xFF0F766E),
+                        corIcone:
+                            const Color(0xFF0F766E),
                       ),
                       _buildAcaoTile(
                         icon: Icons.info_outline,
                         titulo: 'Sobre o app',
-                        subtitulo: 'Trilha Med • Preparação Revalida',
-                        onTap: null,
-                        corIcone: const Color(0xFF7C3AED),
+                        subtitulo:
+                            'Informações do aplicativo',
+                        onTap: _abrirSobreApp,
+                        corIcone:
+                            const Color(0xFF7C3AED),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
                       OutlinedButton.icon(
                         onPressed: _confirmarLogout,
                         icon: const Icon(Icons.logout),
-                        label: const Text('Sair da conta'),
-                        style: OutlinedButton.styleFrom(
+                        label:
+                            const Text('Sair da conta'),
+                        style:
+                            OutlinedButton.styleFrom(
                           foregroundColor: Colors.red,
-                          side: const BorderSide(color: Colors.red),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+                          side: const BorderSide(
+                            color: Colors.red,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 20),
                     ],
                   ),
                 ),
