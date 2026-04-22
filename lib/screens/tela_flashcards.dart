@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart'; // opcional, se quiser upload de imagem
+// opcional, se quiser upload de imagem
 
 class TelaFlashcards extends StatefulWidget {
   final String userId;
@@ -211,15 +211,16 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Erro reportado com sucesso'),
-          backgroundColor: Color(0xFF1E3A8A),
-        ),
-      );
-    } catch (e,
-        st) {
-      if (!mounted) return;
+ScaffoldMessenger.of(context).showSnackBar(
+  const SnackBar(
+    content: Text('Erro reportado com sucesso'),
+    backgroundColor: Color(0xFF1E3A8A),
+  ),
+);
+} catch (e) {
+  if (!mounted) {
+    return;
+  }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

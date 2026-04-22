@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'dart:convert';
 import 'dart:io';
 
@@ -114,8 +115,13 @@ class FirebaseService {
         'createdAt': Timestamp.now(),
         'updatedAt': Timestamp.now(),
       });
-    } catch (e) {
-      print('Erro ao salvar card: $e');
+    } catch (e, st) {
+      developer.log(
+        'Erro ao salvar card: $e',
+        name: 'FirebaseService',
+        error: e,
+        stackTrace: st,
+      );
       rethrow;
     }
   }
@@ -177,8 +183,13 @@ class FirebaseService {
         'searchTerms': searchTerms.toList(),
         'updatedAt': Timestamp.now(),
       });
-    } catch (e) {
-      print('Erro ao atualizar card: $e');
+    } catch (e, st) {
+      developer.log(
+        'Erro ao atualizar card: $e',
+        name: 'FirebaseService',
+        error: e,
+        stackTrace: st,
+      );
       rethrow;
     }
   }
@@ -203,9 +214,14 @@ class FirebaseService {
         }
       }
 
-      await _db.collection('flashcards').doc(cardId).delete();
-    } catch (e) {
-      print('Erro ao excluir card: $e');
+await _db.collection('flashcards').doc(cardId).delete();
+    } catch (e, st) {
+      developer.log(
+        'Erro ao excluir card: $e',
+        name: 'FirebaseService',
+        error: e,
+        stackTrace: st,
+      );
       rethrow;
     }
   }
@@ -221,8 +237,13 @@ class FirebaseService {
       }
 
       await batch.commit();
-    } catch (e) {
-      print('Erro ao excluir cards em lote: $e');
+    } catch (e, st) {
+      developer.log(
+        'Erro ao excluir cards em lote: $e',
+        name: 'FirebaseService',
+        error: e,
+        stackTrace: st,
+      );
       rethrow;
     }
   }
@@ -280,13 +301,19 @@ class FirebaseService {
 
       final blob = html.Blob([bytes], 'application/json');
       final url = html.Url.createObjectUrlFromBlob(blob);
-      final anchor = html.AnchorElement(href: url)
+
+      html.AnchorElement(href: url)
         ..setAttribute('download', nomeArquivo)
         ..click();
 
       html.Url.revokeObjectUrl(url);
-    } catch (e) {
-      print('Erro ao exportar cards: $e');
+    } catch (e, st) {
+      developer.log(
+        'Erro ao exportar cards: $e',
+        name: 'FirebaseService',
+        error: e,
+        stackTrace: st,
+      );
       rethrow;
     }
   }
@@ -375,8 +402,13 @@ class FirebaseService {
       }
 
       return importados;
-    } catch (e) {
-      print('Erro ao importar cards: $e');
+    } catch (e, st) {
+      developer.log(
+        'Erro ao importar cards: $e',
+        name: 'FirebaseService',
+        error: e,
+        stackTrace: st,
+      );
       rethrow;
     }
   }
@@ -395,8 +427,13 @@ class FirebaseService {
 
       await ref.putFile(imagem);
       return await ref.getDownloadURL();
-    } catch (e) {
-      print('Erro ao enviar imagem: $e');
+    } catch (e, st) {
+      developer.log(
+        'Erro ao enviar imagem: $e',
+        name: 'FirebaseService',
+        error: e,
+        stackTrace: st,
+      );
       return null;
     }
   }
@@ -406,8 +443,13 @@ class FirebaseService {
     try {
       final ref = FirebaseStorage.instance.refFromURL(url);
       await ref.delete();
-    } catch (e) {
-      print('Erro ao excluir arquivo do storage: $e');
+    } catch (e, st) {
+      developer.log(
+        'Erro ao excluir arquivo do storage: $e',
+        name: 'FirebaseService',
+        error: e,
+        stackTrace: st,
+      );
     }
   }
 }
