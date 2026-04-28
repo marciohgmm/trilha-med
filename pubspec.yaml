@@ -26,13 +26,10 @@ dependencies:
   cloud_firestore: ^6.3.0
   firebase_storage: ^13.3.0
   image_picker: ^1.1.2
-<<<<<<< HEAD
-  flutter_quill: ^11.4.2
-=======
 
   # 🔥 Editor rico (VERSÕES COMPATÍVEIS)
   flutter_quill: 11.5.0
->>>>>>> 7a2f09e4817106aa1e9ffe6a4c09085bb31bf66e
+
   flutter_html: ^3.0.0-beta.2
 
 dev_dependencies:

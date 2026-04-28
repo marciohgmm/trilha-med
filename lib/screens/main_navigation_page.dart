@@ -25,35 +25,59 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       PerfilPage(userId: widget.userId),
     ];
 
+    final isMobile = MediaQuery.of(context).size.width < 600;
+
     return Scaffold(
       body: IndexedStack(
         index: _selectedIndex,
         children: paginas,
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
-        height: 72,
-        backgroundColor: Colors.white,
-        indicatorColor: const Color(0xFF1E3A8A).withOpacity(0.12),
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Início',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Perfil',
-          ),
-        ],
-      ),
+      bottomNavigationBar: isMobile
+          ? BottomNavigationBar(
+              currentIndex: _selectedIndex,
+              onTap: (index) {
+                setState(() {
+                  _selectedIndex = index;
+                });
+              },
+              items: const [
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.home_outlined),
+                  activeIcon: Icon(Icons.home),
+                  label: 'Início',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.person_outline),
+                  activeIcon: Icon(Icons.person),
+                  label: 'Perfil',
+                ),
+              ],
+            )
+          : NavigationBar(
+              selectedIndex: _selectedIndex,
+              onDestinationSelected: (index) {
+                setState(() {
+                  _selectedIndex = index;
+                });
+              },
+              height: 72,
+              backgroundColor: Colors.white,
+              indicatorColor: const Color(0xFF1E3A8A).withOpacity(0.12),
+              labelBehavior:
+                  NavigationDestinationLabelBehavior.alwaysShow,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.home_outlined),
+                  selectedIcon: Icon(Icons.home),
+                  label: 'Início',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.person_outline),
+                  selectedIcon: Icon(Icons.person),
+                  label: 'Perfil',
+                ),
+              ],
+            ),
     );
   }
 }

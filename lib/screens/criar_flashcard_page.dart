@@ -444,7 +444,7 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
           const SizedBox(height: 10),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            child: Row(
+            child: Wrap(
               children: [
                 quill.QuillToolbarHistoryButton(
                   controller: controller,
@@ -533,7 +533,10 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
       data: {'campo': campo},
     );
     // #endregion
-    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+    final XFile? image = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
 
     if (image == null) return;
     if (!mounted) return;
@@ -544,6 +547,19 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
       final extensao = nomeOriginal.contains('.')
           ? nomeOriginal.split('.').last.toLowerCase()
           : image.path.split('.').last.toLowerCase();
+
+      // Validar extensão
+      if (!['jpg', 'jpeg'].contains(extensao)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Por favor, selecione uma imagem em formato JPG ou JPEG'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
+
       final nomeArquivo =
           '${campo}_${DateTime.now().millisecondsSinceEpoch}.${extensao.isEmpty ? 'jpg' : extensao}';
       // #region agent log
