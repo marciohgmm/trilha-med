@@ -4,12 +4,54 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:universal_html/html.dart' as html;
+import 'dart:typed_data';
 
 /// Serviço que abstrai todas as operações de cards e arquivos.
 class FirebaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  Future<void> _debugLog({
+    required String hypothesisId,
+    required String location,
+    required String message,
+    required Map<String, dynamic> data,
+    String runId = 'pre-fix',
+  }) async {
+    final payload = {
+      'sessionId': 'f07c83',
+      'runId': runId,
+      'hypothesisId': hypothesisId,
+      'location': location,
+      'message': message,
+      'data': data,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+    if (kIsWeb) {
+      try {
+        await http.post(
+          Uri.parse(
+            'http://127.0.0.1:7463/ingest/d9685535-6979-4ca8-bff0-c9a30618c2c4',
+          ),
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': 'f07c83',
+          },
+          body: jsonEncode(payload),
+        );
+      } catch (_) {}
+      return;
+    }
+
+    try {
+      await File(
+        'debug-f07c83.log',
+      ).writeAsString('${jsonEncode(payload)}\n', mode: FileMode.append);
+    } catch (_) {}
+  }
 
   Set<String> _gerarSearchTerms(List<String> textos) {
     final termos = <String>{};
@@ -64,29 +106,45 @@ class FirebaseService {
     required String pergunta,
     required String resposta,
     String? explicacao,
-    File? imagemPergunta,
-    File? imagemResposta,
+    Uint8List? imagemPergunta,
+    Uint8List? imagemResposta,
     String dificuldade = "medio",
   }) async {
     try {
+      // #region agent log
+      await _debugLog(
+        hypothesisId: 'H4',
+        location: 'firebase_service.dart:72',
+        message: 'adicionarCard:start',
+        data: {
+          'materia': materia,
+          'tema': tema,
+          'subtema': subtema,
+          'perguntaLen': pergunta.length,
+          'respostaLen': resposta.length,
+          'hasImagemPergunta': imagemPergunta != null,
+          'hasImagemResposta': imagemResposta != null,
+        },
+      );
+      // #endregion
       final docRef = _db.collection('flashcards').doc();
 
       String? urlPergunta;
       String? urlResposta;
 
-      // Envia imagem da pergunta, se existir.
+      // Envia imagem da pergunta, se existir (como Uint8List).
       if (imagemPergunta != null) {
         urlPergunta = await uploadImagem(
           imagemPergunta,
-          'pergunta_${docRef.id}${p.extension(imagemPergunta.path).isEmpty ? '.jpg' : p.extension(imagemPergunta.path)}',
+          'pergunta_${docRef.id}${p.extension('_imagemPergunta_').isEmpty ? '.jpg' : p.extension('_imagemPergunta_')}',
         );
       }
 
-      // Envia imagem da resposta, se existir.
+      // Envia imagem da resposta, se existir (como Uint8List).
       if (imagemResposta != null) {
         urlResposta = await uploadImagem(
           imagemResposta,
-          'resposta_${docRef.id}${p.extension(imagemResposta.path).isEmpty ? '.jpg' : p.extension(imagemResposta.path)}',
+          'resposta_${docRef.id}${p.extension('_imagemResposta_').isEmpty ? '.jpg' : p.extension('_imagemResposta_')}',
         );
       }
 
@@ -114,7 +172,23 @@ class FirebaseService {
         'createdAt': Timestamp.now(),
         'updatedAt': Timestamp.now(),
       });
+      // #region agent log
+      await _debugLog(
+        hypothesisId: 'H4',
+        location: 'firebase_service.dart:118',
+        message: 'adicionarCard:success',
+        data: {'docId': docRef.id},
+      );
+      // #endregion
     } catch (e) {
+      // #region agent log
+      await _debugLog(
+        hypothesisId: 'H4',
+        location: 'firebase_service.dart:119',
+        message: 'adicionarCard:error',
+        data: {'error': e.toString()},
+      );
+      // #endregion
       print('Erro ao salvar card: $e');
       rethrow;
     }
@@ -129,8 +203,8 @@ class FirebaseService {
     required String pergunta,
     required String resposta,
     String? explicacao,
-    File? novaImagemPergunta,
-    File? novaImagemResposta,
+    Uint8List? novaImagemPergunta,
+    Uint8List? novaImagemResposta,
     String? imagemPerguntaAtual,
     String? imagemRespostaAtual,
     String dificuldade = "medio",
@@ -141,17 +215,17 @@ class FirebaseService {
 
       if (novaImagemPergunta != null) {
         urlPergunta = (await uploadImagem(
-              novaImagemPergunta,
-              'pergunta_$cardId${p.extension(novaImagemPergunta.path).isEmpty ? '.jpg' : p.extension(novaImagemPergunta.path)}',
-            )) ??
+          novaImagemPergunta,
+          'pergunta_$cardId${p.extension('_imagemPergunta_').isEmpty ? '.jpg' : p.extension('_imagemPergunta_')}',
+        )) ??
             urlPergunta;
       }
 
       if (novaImagemResposta != null) {
         urlResposta = (await uploadImagem(
-              novaImagemResposta,
-              'resposta_$cardId${p.extension(novaImagemResposta.path).isEmpty ? '.jpg' : p.extension(novaImagemResposta.path)}',
-            )) ??
+          novaImagemResposta,
+          'resposta_$cardId${p.extension('_imagemResposta_').isEmpty ? '.jpg' : p.extension('_imagemResposta_')}',
+        )) ??
             urlResposta;
       }
 
@@ -294,11 +368,10 @@ class FirebaseService {
   /// Importa cards de um arquivo JSON (dosados, evitando dados inválidos).
   Future<int> importarCardsJson() async {
     try {
-      final resultado = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['json'],
-        withData: true,
-      );
+      final resultado = await FilePicker.pickFiles(
+  type: FileType.image,
+  withData: true,
+);
 
       if (resultado == null || resultado.files.isEmpty) {
         return 0;
@@ -385,17 +458,48 @@ class FirebaseService {
   // Imagem / Firebase Storage
   // ========================================================================
 
-  /// Envia uma imagem para o Firebase Storage e retorna a URL de download.
-  Future<String?> uploadImagem(File imagem, String nomeArquivo) async {
+  /// Envia uma imagem (como Uint8List) para o Firebase Storage e retorna a URL de download.
+  Future<String?> uploadImagem(
+    Uint8List imagemBytes,
+    String nomeArquivo,
+  ) async {
     try {
+      // #region agent log
+      await _debugLog(
+        hypothesisId: 'H1',
+        location: 'firebase_service.dart:394',
+        message: 'uploadImagem:start',
+        data: {
+          'nomeArquivo': nomeArquivo,
+          'bytesLength': imagemBytes.length,
+        },
+      );
+      // #endregion
       final ref = FirebaseStorage.instance
           .ref()
           .child('flashcards')
           .child(nomeArquivo);
 
-      await ref.putFile(imagem);
-      return await ref.getDownloadURL();
+      await ref.putData(imagemBytes);
+      final url = await ref.getDownloadURL();
+      // #region agent log
+      await _debugLog(
+        hypothesisId: 'H1',
+        location: 'firebase_service.dart:400',
+        message: 'uploadImagem:success',
+        data: {'nomeArquivo': nomeArquivo, 'hasUrl': url.isNotEmpty},
+      );
+      // #endregion
+      return url;
     } catch (e) {
+      // #region agent log
+      await _debugLog(
+        hypothesisId: 'H1',
+        location: 'firebase_service.dart:402',
+        message: 'uploadImagem:error',
+        data: {'nomeArquivo': nomeArquivo, 'error': e.toString()},
+      );
+      // #endregion
       print('Erro ao enviar imagem: $e');
       return null;
     }

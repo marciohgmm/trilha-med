@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart'; // opcional, se quiser upload de imagem
+import 'dart:convert';
+import 'package:flutter/gestures.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class TelaFlashcards extends StatefulWidget {
   final String userId;
@@ -25,6 +27,184 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
   bool mostrandoResposta = false;
   bool salvando = false;
   bool enviandoReport = false;
+
+  String _normalizarConteudoRichText(dynamic valor) {
+    final texto = (valor ?? '').toString();
+    if (texto.trim().isEmpty) return '';
+
+    try {
+      final decoded = jsonDecode(texto);
+      if (decoded is List) {
+        final buffer = StringBuffer();
+        for (final op in decoded) {
+          if (op is Map && op['insert'] is String) {
+            buffer.write(op['insert'] as String);
+          }
+        }
+        return buffer.toString().trim();
+      }
+    } catch (_) {
+      // Já é texto comum.
+    }
+
+    return texto;
+  }
+
+  Color? _parseHexColor(String? value) {
+    if (value == null || value.isEmpty) return null;
+    final hex = value.replaceFirst('#', '');
+    if (hex.length == 6) {
+      return Color(int.parse('FF$hex', radix: 16));
+    }
+    if (hex.length == 8) {
+      return Color(int.parse(hex, radix: 16));
+    }
+    return null;
+  }
+
+  List<dynamic>? _tryDecodeDelta(dynamic valor) {
+    final texto = (valor ?? '').toString();
+    if (texto.trim().isEmpty) return null;
+
+    try {
+      final decoded = jsonDecode(texto);
+      if (decoded is List) return decoded;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  TextSpan _toSpanFromOp(Map op) {
+    final insert = op['insert']?.toString() ?? '';
+    final attrs = op['attributes'];
+    final atributos = attrs is Map ? attrs : const {};
+
+    final fontWeight = atributos['bold'] == true ? FontWeight.bold : FontWeight.w400;
+    final fontStyle = atributos['italic'] == true ? FontStyle.italic : FontStyle.normal;
+    final decorationParts = <TextDecoration>[];
+    if (atributos['underline'] == true) decorationParts.add(TextDecoration.underline);
+    if (atributos['strike'] == true) decorationParts.add(TextDecoration.lineThrough);
+    if (atributos['link'] != null) decorationParts.add(TextDecoration.underline);
+
+    final link = atributos['link']?.toString();
+    final textColor = link != null
+        ? const Color(0xFF1D4ED8)
+        : _parseHexColor(atributos['color']?.toString()) ?? Colors.black87;
+    final background = _parseHexColor(atributos['background']?.toString());
+
+    TapGestureRecognizer? recognizer;
+    if (link != null && link.isNotEmpty) {
+      recognizer = TapGestureRecognizer()
+        ..onTap = () async {
+          final uri = Uri.tryParse(link);
+          if (uri != null) {
+            await launchUrl(uri, mode: LaunchMode.platformDefault);
+          }
+        };
+    }
+
+    return TextSpan(
+      text: insert,
+      recognizer: recognizer,
+      style: TextStyle(
+        fontWeight: fontWeight,
+        fontStyle: fontStyle,
+        color: textColor,
+        backgroundColor: background,
+        decoration: decorationParts.isEmpty
+            ? TextDecoration.none
+            : TextDecoration.combine(decorationParts),
+      ),
+    );
+  }
+
+  Widget _buildConteudoFormatado({
+    required dynamic valor,
+    required bool destaquePergunta,
+  }) {
+    final delta = _tryDecodeDelta(valor);
+    if (delta == null) {
+      return Text(
+        _normalizarConteudoRichText(valor),
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 20,
+          height: 1.5,
+          color: Colors.black87,
+          fontWeight: destaquePergunta ? FontWeight.bold : FontWeight.w500,
+        ),
+      );
+    }
+
+    final widgets = <Widget>[];
+    final spans = <TextSpan>[];
+
+    void flushSpans() {
+      if (spans.isEmpty) return;
+      widgets.add(
+        RichText(
+          textAlign: TextAlign.center,
+          text: TextSpan(
+            style: TextStyle(
+              fontSize: 20,
+              height: 1.5,
+              color: Colors.black87,
+              fontWeight: destaquePergunta ? FontWeight.bold : FontWeight.w500,
+            ),
+            children: List<TextSpan>.from(spans),
+          ),
+        ),
+      );
+      spans.clear();
+    }
+
+    for (final raw in delta) {
+      if (raw is! Map) continue;
+      final op = Map<String, dynamic>.from(raw);
+      final insert = op['insert'];
+
+      if (insert is String) {
+        if (insert.isNotEmpty) spans.add(_toSpanFromOp(op));
+      } else if (insert is Map && insert['image'] != null) {
+        flushSpans();
+        final imageUrl = insert['image'].toString();
+        if (imageUrl.isNotEmpty) {
+          widgets.add(
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Image.network(
+                imageUrl,
+                height: 180,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) =>
+                    const Text('Imagem não carregada'),
+              ),
+            ),
+          );
+        }
+      }
+    }
+    flushSpans();
+
+    if (widgets.isEmpty) {
+      return Text(
+        _normalizarConteudoRichText(valor),
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 20,
+          height: 1.5,
+          color: Colors.black87,
+          fontWeight: destaquePergunta ? FontWeight.bold : FontWeight.w500,
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: widgets,
+    );
+  }
 
   void proximoCard(int total) {
     setState(() {
@@ -65,9 +245,7 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
     // Use max 0 e keep within 0..4
     const maxNivel = 4;
 
-    if (dificuldade == "Errei") {
-      novoNivel = 0;
-    } else if (dificuldade == "Difícil") {
+    if (dificuldade == "Difícil") {
       novoNivel = (nivelAtual - 1).clamp(0, maxNivel);
     } else if (dificuldade == "Fácil") {
       novoNivel = (nivelAtual + 1).clamp(0, maxNivel);
@@ -106,7 +284,7 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
     int acertos = 0;
     int erros = 0;
 
-    if (dificuldade == "Errei" || dificuldade == "Difícil") {
+    if (dificuldade == "Difícil") {
       erros = 1;
     } else {
       acertos = 1;
@@ -217,8 +395,7 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
           backgroundColor: Color(0xFF1E3A8A),
         ),
       );
-    } catch (e,
-        st) {
+    } catch (e) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -255,8 +432,7 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
       // );
 
       proximoCard(total);
-    } catch (e,
-        st) {
+    } catch (e) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -312,11 +488,11 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
             final cardId = data.id;
             final indiceCard = indiceAtual + 1;
 
-            final perguntaTexto = data['pergunta'] ?? '';
-            final respostaTexto = data['resposta'] ?? '';
+            final perguntaTexto = _normalizarConteudoRichText(data['pergunta']);
+            final respostaTexto = _normalizarConteudoRichText(data['resposta']);
             final imagemPergunta = data['imagemPergunta'] ?? '';
             final imagemResposta = data['imagemResposta'] ?? '';
-            final explicacao = data['explicacao'] ?? '';
+            final explicacao = _normalizarConteudoRichText(data['explicacao']);
 
             return Column(
               children: [
@@ -346,17 +522,9 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
                                 () => mostrandoResposta = !mostrandoResposta),
                             child: Column(
                               children: [
-                                Text(
-                                  mostrandoResposta ? respostaTexto : perguntaTexto,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    height: 1.5,
-                                    color: Colors.black87,
-                                    fontWeight: !mostrandoResposta
-                                        ? FontWeight.bold
-                                        : FontWeight.w500,
-                                  ),
+                                _buildConteudoFormatado(
+                                  valor: mostrandoResposta ? data['resposta'] : data['pergunta'],
+                                  destaquePergunta: !mostrandoResposta,
                                 ),
                                 const SizedBox(height: 16),
                                 if (!mostrandoResposta &&
@@ -379,9 +547,14 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
                                     explicacao.toString().isNotEmpty)
                                   Padding(
                                     padding: const EdgeInsets.only(top: 12),
-                                    child: Text(
-                                      '💡 $explicacao',
-                                      textAlign: TextAlign.center,
+                                    child: Column(
+                                      children: [
+                                        const Text('💡', textAlign: TextAlign.center),
+                                        _buildConteudoFormatado(
+                                          valor: data['explicacao'],
+                                          destaquePergunta: false,
+                                        ),
+                                      ],
                                     ),
                                   ),
                               ],
@@ -473,15 +646,6 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
                               onPressed: () => responderCard(
                                 cardId,
                                 'Difícil',
-                                docs.length,
-                              ),
-                            ),
-                            _BotaoDificuldade(
-                              texto: 'Errei',
-                              cor: Colors.red,
-                              onPressed: () => responderCard(
-                                cardId,
-                                'Errei',
                                 docs.length,
                               ),
                             ),
