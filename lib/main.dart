@@ -43,10 +43,10 @@ class RevalidaApp extends StatelessWidget {
       title: 'Trilha Med',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [
-        FlutterQuillLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
+        FlutterQuillLocalizations.delegate,
       ],
       supportedLocales: const [
         Locale('pt', 'BR'),
@@ -85,16 +85,6 @@ class UpdateApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      localizationsDelegates: const [
-        FlutterQuillLocalizations.delegate,
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      supportedLocales: const [
-        Locale('pt', 'BR'),
-        Locale('en'),
-      ],
       home: Scaffold(
         backgroundColor: Colors.blue,
         body: SafeArea(

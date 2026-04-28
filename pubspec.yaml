@@ -13,20 +13,26 @@ dependencies:
   flutter_localizations:
     sdk: flutter
 
-  file_picker: ^10.1.9
+  file_picker: ^11.0.2
   path: ^1.9.0
   universal_html: ^2.2.4
   cupertino_icons: ^1.0.8
-  firebase_core: ^3.15.2
-  firebase_auth: ^5.3.1
+  firebase_core: ^4.7.0
+  firebase_auth: ^6.4.0
   url_launcher: ^6.3.1
   shared_preferences: ^2.5.4
   connectivity_plus: ^7.0.0
   http: ^1.6.0
-  cloud_firestore: ^5.6.12
-  firebase_storage: ^12.3.0
+  cloud_firestore: ^6.3.0
+  firebase_storage: ^13.3.0
   image_picker: ^1.1.2
+<<<<<<< HEAD
   flutter_quill: ^11.4.2
+=======
+
+  # 🔥 Editor rico (VERSÕES COMPATÍVEIS)
+  flutter_quill: 11.5.0
+>>>>>>> 7a2f09e4817106aa1e9ffe6a4c09085bb31bf66e
   flutter_html: ^3.0.0-beta.2
 
 dev_dependencies:
