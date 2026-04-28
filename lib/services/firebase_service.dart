@@ -38,7 +38,8 @@ class FirebaseService {
 
       if (texto.isEmpty) continue;
 
-      final palavras = texto.split(RegExp(r'\s+'));
+      final textoSemHtml = texto.replaceAll(RegExp(r'<[^>]*>'), ' ');
+      final palavras = textoSemHtml.split(RegExp(r'\s+'));
 
       for (final palavra in palavras) {
         final limpa = palavra.replaceAll(RegExp(r'[^a-z0-9]'), '');
@@ -57,7 +58,7 @@ class FirebaseService {
   // FLASHCARDS: CRUD
   // ========================================================================
 
-  /// Cria um novo flashcard, com ou sem imagem.
+  /// Cria um novo flashcard.
   Future<void> adicionarCard({
     required String materia,
     required String tema,
@@ -65,31 +66,10 @@ class FirebaseService {
     required String pergunta,
     required String resposta,
     String? explicacao,
-    File? imagemPergunta,
-    File? imagemResposta,
     String dificuldade = "medio",
   }) async {
     try {
       final docRef = _db.collection('flashcards').doc();
-
-      String? urlPergunta;
-      String? urlResposta;
-
-      // Envia imagem da pergunta, se existir.
-      if (imagemPergunta != null) {
-        urlPergunta = await uploadImagem(
-          imagemPergunta,
-          'pergunta_${docRef.id}${p.extension(imagemPergunta.path).isEmpty ? '.jpg' : p.extension(imagemPergunta.path)}',
-        );
-      }
-
-      // Envia imagem da resposta, se existir.
-      if (imagemResposta != null) {
-        urlResposta = await uploadImagem(
-          imagemResposta,
-          'resposta_${docRef.id}${p.extension(imagemResposta.path).isEmpty ? '.jpg' : p.extension(imagemResposta.path)}',
-        );
-      }
 
       final searchTerms = _gerarSearchTerms([
         materia,
@@ -108,12 +88,14 @@ class FirebaseService {
         'pergunta': pergunta,
         'resposta': resposta,
         'explicacao': explicacao ?? '',
-        'imagemPergunta': urlPergunta ?? '',
-        'imagemResposta': urlResposta ?? '',
         'dificuldade': dificuldade,
         'searchTerms': searchTerms.toList(),
         'createdAt': Timestamp.now(),
         'updatedAt': Timestamp.now(),
+
+        // Mantidos vazios para compatibilidade temporária com cards antigos
+        'imagemPergunta': '',
+        'imagemResposta': '',
       });
     } catch (e, st) {
       developer.log(
@@ -126,7 +108,7 @@ class FirebaseService {
     }
   }
 
-  /// Atualiza um flashcard já existente (incluindo substituição de imagens).
+  /// Atualiza um flashcard já existente.
   Future<void> atualizarCard({
     required String cardId,
     required String materia,
@@ -135,32 +117,9 @@ class FirebaseService {
     required String pergunta,
     required String resposta,
     String? explicacao,
-    File? novaImagemPergunta,
-    File? novaImagemResposta,
-    String? imagemPerguntaAtual,
-    String? imagemRespostaAtual,
     String dificuldade = "medio",
   }) async {
     try {
-      String urlPergunta = imagemPerguntaAtual ?? '';
-      String urlResposta = imagemRespostaAtual ?? '';
-
-      if (novaImagemPergunta != null) {
-        urlPergunta = (await uploadImagem(
-              novaImagemPergunta,
-              'pergunta_$cardId${p.extension(novaImagemPergunta.path).isEmpty ? '.jpg' : p.extension(novaImagemPergunta.path)}',
-            )) ??
-            urlPergunta;
-      }
-
-      if (novaImagemResposta != null) {
-        urlResposta = (await uploadImagem(
-              novaImagemResposta,
-              'resposta_$cardId${p.extension(novaImagemResposta.path).isEmpty ? '.jpg' : p.extension(novaImagemResposta.path)}',
-            )) ??
-            urlResposta;
-      }
-
       final searchTerms = _gerarSearchTerms([
         materia,
         tema,
@@ -177,11 +136,13 @@ class FirebaseService {
         'pergunta': pergunta,
         'resposta': resposta,
         'explicacao': explicacao ?? '',
-        'imagemPergunta': urlPergunta,
-        'imagemResposta': urlResposta,
         'dificuldade': dificuldade,
         'searchTerms': searchTerms.toList(),
         'updatedAt': Timestamp.now(),
+
+        // Zerados para evitar conflito com visualização antiga
+        'imagemPergunta': '',
+        'imagemResposta': '',
       });
     } catch (e, st) {
       developer.log(
@@ -194,7 +155,7 @@ class FirebaseService {
     }
   }
 
-  /// Exclui um card e suas imagens associadas no Storage.
+  /// Exclui um card e tenta excluir imagens antigas associadas no Storage.
   Future<void> excluirCard(String cardId) async {
     try {
       final doc = await _db.collection('flashcards').doc(cardId).get();
@@ -214,7 +175,7 @@ class FirebaseService {
         }
       }
 
-await _db.collection('flashcards').doc(cardId).delete();
+      await _db.collection('flashcards').doc(cardId).delete();
     } catch (e, st) {
       developer.log(
         'Erro ao excluir card: $e',
@@ -226,7 +187,7 @@ await _db.collection('flashcards').doc(cardId).delete();
     }
   }
 
-  /// Exclui vários cards em lote (sem tratar imagens por enquanto).
+  /// Exclui vários cards em lote.
   Future<void> excluirCardsEmLote(List<String> cardIds) async {
     try {
       final batch = _db.batch();
@@ -252,7 +213,6 @@ await _db.collection('flashcards').doc(cardId).delete();
   // LISTAGEM E EXPORTAÇÃO
   // ========================================================================
 
-  /// Stream contínuo de cards ordenados por data de criação decrescente.
   Stream<QuerySnapshot> listarCardsStream() {
     return _db
         .collection('flashcards')
@@ -260,7 +220,6 @@ await _db.collection('flashcards').doc(cardId).delete();
         .snapshots();
   }
 
-  /// Lista todos os cards para exportar em JSON (sem paginar).
   Future<List<Map<String, dynamic>>> listarCardsParaExportacao() async {
     final snapshot = await _db
         .collection('flashcards')
@@ -290,7 +249,6 @@ await _db.collection('flashcards').doc(cardId).delete();
     }).toList();
   }
 
-  /// Exporta todos os cards para um arquivo JSON e oferece para download (Web).
   Future<void> exportarCardsJson() async {
     try {
       final cards = await listarCardsParaExportacao();
@@ -318,7 +276,6 @@ await _db.collection('flashcards').doc(cardId).delete();
     }
   }
 
-  /// Importa cards de um arquivo JSON (dosados, evitando dados inválidos).
   Future<int> importarCardsJson() async {
     try {
       final resultado = await FilePicker.platform.pickFiles(
@@ -414,10 +371,9 @@ await _db.collection('flashcards').doc(cardId).delete();
   }
 
   // ========================================================================
-  // Imagem / Firebase Storage
+  // IMAGEM / FIREBASE STORAGE
   // ========================================================================
 
-  /// Envia uma imagem para o Firebase Storage e retorna a URL de download.
   Future<String?> uploadImagem(File imagem, String nomeArquivo) async {
     try {
       final ref = FirebaseStorage.instance
@@ -438,7 +394,6 @@ await _db.collection('flashcards').doc(cardId).delete();
     }
   }
 
-  /// Deleta um arquivo no Firebase Storage a partir de sua URL.
   Future<void> _excluirArquivoStoragePorUrl(String url) async {
     try {
       final ref = FirebaseStorage.instance.refFromURL(url);

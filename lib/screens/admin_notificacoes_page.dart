@@ -1,4 +1,4 @@
-import 'package:flutter_application_1/screens/criar_flashcard_page.dart';
+import 'package:flutter_application_1/screens/criar_flashcard_page.dart';  // ← CORRETO, remove o '../'
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
@@ -227,7 +227,6 @@ class AdminNotificacoesPage extends StatelessWidget {
     );
   }
 }
-
 class AdminNotificacaoDetalhePage extends StatelessWidget {
   final Map<String, dynamic> data;
 
@@ -286,7 +285,7 @@ class AdminNotificacaoDetalhePage extends StatelessWidget {
           if (podeEditarCard) ...[
             ElevatedButton.icon(
               onPressed: () async {
-                final resultado = await Navigator.push(
+                final resultado = await Navigator.push<bool>(
                   context,
                   MaterialPageRoute(
                     builder: (_) => CriarFlashcardPage(

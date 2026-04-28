@@ -1,10 +1,13 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/services/firebase_service.dart';
+import 'package:flutter_quill/flutter_quill.dart' as quill;
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-
 
 class CriarFlashcardPage extends StatefulWidget {
   final String? cardId;
@@ -21,18 +24,23 @@ class CriarFlashcardPage extends StatefulWidget {
 }
 
 class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
-  final perguntaController = TextEditingController();
-  final respostaController = TextEditingController();
-  final explicacaoController = TextEditingController();
+  final quill.QuillController perguntaController =
+      quill.QuillController.basic();
+  final quill.QuillController respostaController =
+      quill.QuillController.basic();
+  final quill.QuillController explicacaoController =
+      quill.QuillController.basic();
+
+  final FocusNode perguntaFocusNode = FocusNode();
+  final FocusNode respostaFocusNode = FocusNode();
+  final FocusNode explicacaoFocusNode = FocusNode();
+
+  final ScrollController perguntaScrollController = ScrollController();
+  final ScrollController respostaScrollController = ScrollController();
+  final ScrollController explicacaoScrollController = ScrollController();
 
   final FirebaseService firebaseService = FirebaseService();
   final ImagePicker picker = ImagePicker();
-
-  File? imagemPergunta;
-  File? imagemResposta;
-
-  String imagemPerguntaUrlAtual = '';
-  String imagemRespostaUrlAtual = '';
 
   List<String> materias = [];
   List<String> temas = [];
@@ -47,6 +55,45 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
 
   bool get modoEdicao => widget.cardId != null && widget.dados != null;
 
+  Future<void> _debugLog({
+    required String hypothesisId,
+    required String location,
+    required String message,
+    required Map<String, dynamic> data,
+    String runId = 'pre-fix',
+  }) async {
+    final payload = {
+      'sessionId': 'f07c83',
+      'runId': runId,
+      'hypothesisId': hypothesisId,
+      'location': location,
+      'message': message,
+      'data': data,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+    if (kIsWeb) {
+      try {
+        await http.post(
+          Uri.parse(
+            'http://127.0.0.1:7463/ingest/d9685535-6979-4ca8-bff0-c9a30618c2c4',
+          ),
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': 'f07c83',
+          },
+          body: jsonEncode(payload),
+        );
+      } catch (_) {}
+      return;
+    }
+
+    try {
+      await File(
+        'debug-f07c83.log',
+      ).writeAsString('${jsonEncode(payload)}\n', mode: FileMode.append);
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
@@ -58,16 +105,59 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
     perguntaController.dispose();
     respostaController.dispose();
     explicacaoController.dispose();
+
+    perguntaFocusNode.dispose();
+    respostaFocusNode.dispose();
+    explicacaoFocusNode.dispose();
+
+    perguntaScrollController.dispose();
+    respostaScrollController.dispose();
+    explicacaoScrollController.dispose();
+
     super.dispose();
   }
 
+  Future<void> _carregarConteudoNoController(
+    quill.QuillController controller,
+    String conteudo,
+  ) async {
+    if (conteudo.trim().isEmpty) return;
+
+    try {
+      final decoded = jsonDecode(conteudo);
+      if (decoded is List) {
+        controller.document = quill.Document.fromJson(
+          List<Map<String, dynamic>>.from(
+            decoded.map((item) => Map<String, dynamic>.from(item as Map)),
+          ),
+        );
+      } else {
+        controller.document = quill.Document()..insert(0, conteudo);
+      }
+    } catch (_) {
+      controller.document = quill.Document()..insert(0, conteudo);
+    }
+    controller.updateSelection(
+      const TextSelection.collapsed(offset: 0),
+      quill.ChangeSource.local,
+    );
+  }
+
   Future<void> carregarMaterias() async {
+    // #region agent log
+    await _debugLog(
+      hypothesisId: 'H2',
+      location: 'criar_flashcard_page.dart:92',
+      message: 'carregarMaterias:start',
+      data: {'modoEdicao': modoEdicao},
+    );
+    // #endregion
     final snapshot =
         await FirebaseFirestore.instance.collection('flashcards').get();
 
     final set = <String>{};
 
-    for (var doc in snapshot.docs) {
+    for (final doc in snapshot.docs) {
       final materia = (doc.data()['materia'] ?? '').toString().trim();
       if (materia.isNotEmpty) {
         set.add(materia);
@@ -75,6 +165,14 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
     }
 
     final lista = set.toList()..sort();
+    // #region agent log
+    await _debugLog(
+      hypothesisId: 'H2',
+      location: 'criar_flashcard_page.dart:104',
+      message: 'carregarMaterias:loaded',
+      data: {'materiasCount': lista.length},
+    );
+    // #endregion
 
     if (!mounted) return;
 
@@ -94,61 +192,41 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
   Future<void> _preencherDadosEdicao() async {
     final dados = widget.dados!;
 
-    perguntaController.text = (dados['pergunta'] ?? '').toString();
-    respostaController.text = (dados['resposta'] ?? '').toString();
-    explicacaoController.text = (dados['explicacao'] ?? '').toString();
-
     materiaSelecionada = (dados['materia'] ?? '').toString().trim();
     temaSelecionado = (dados['tema'] ?? '').toString().trim();
     subtemaSelecionado = (dados['subtema'] ?? '').toString().trim();
 
-    imagemPerguntaUrlAtual = (dados['imagemPergunta'] ?? '').toString();
-    imagemRespostaUrlAtual = (dados['imagemResposta'] ?? '').toString();
-
     if (materiaSelecionada != null && materiaSelecionada!.isNotEmpty) {
-      await carregarTemas(materiaSelecionada!, silencioso: true);
+      await carregarTemas(materiaSelecionada!);
     }
 
     if (materiaSelecionada != null &&
-        materiaSelecionada!.isNotEmpty &&
         temaSelecionado != null &&
         temaSelecionado!.isNotEmpty) {
-      await carregarSubtemas(
-        materiaSelecionada!,
-        temaSelecionado!,
-        silencioso: true,
-      );
+      await carregarSubtemas(materiaSelecionada!, temaSelecionado!);
     }
+
+    await _carregarConteudoNoController(
+      perguntaController,
+      (dados['pergunta'] ?? '').toString(),
+    );
+    await _carregarConteudoNoController(
+      respostaController,
+      (dados['resposta'] ?? '').toString(),
+    );
+    await _carregarConteudoNoController(
+      explicacaoController,
+      (dados['explicacao'] ?? '').toString(),
+    );
 
     if (!mounted) return;
 
     setState(() {
-      if (materiaSelecionada != null &&
-          materiaSelecionada!.isNotEmpty &&
-          !materias.contains(materiaSelecionada)) {
-        materias.add(materiaSelecionada!);
-        materias.sort();
-      }
-
-      if (temaSelecionado != null &&
-          temaSelecionado!.isNotEmpty &&
-          !temas.contains(temaSelecionado)) {
-        temas.add(temaSelecionado!);
-        temas.sort();
-      }
-
-      if (subtemaSelecionado != null &&
-          subtemaSelecionado!.isNotEmpty &&
-          !subtemas.contains(subtemaSelecionado)) {
-        subtemas.add(subtemaSelecionado!);
-        subtemas.sort();
-      }
-
       carregando = false;
     });
   }
 
-  Future<void> carregarTemas(String materia, {bool silencioso = false}) async {
+  Future<void> carregarTemas(String materia) async {
     final snapshot = await FirebaseFirestore.instance
         .collection('flashcards')
         .where('materia', isEqualTo: materia)
@@ -156,30 +234,22 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
 
     final set = <String>{};
 
-    for (var doc in snapshot.docs) {
+    for (final doc in snapshot.docs) {
       final tema = (doc.data()['tema'] ?? '').toString().trim();
       if (tema.isNotEmpty) {
         set.add(tema);
       }
     }
 
-    final lista = set.toList()..sort();
-
     if (!mounted) return;
 
     setState(() {
-      temas = lista;
-      if (!silencioso) {
-        subtemas = [];
-      }
+      temas = set.toList()..sort();
+      subtemas = [];
     });
   }
 
-  Future<void> carregarSubtemas(
-    String materia,
-    String tema, {
-    bool silencioso = false,
-  }) async {
+  Future<void> carregarSubtemas(String materia, String tema) async {
     final snapshot = await FirebaseFirestore.instance
         .collection('flashcards')
         .where('materia', isEqualTo: materia)
@@ -188,20 +258,17 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
 
     final set = <String>{};
 
-    for (var doc in snapshot.docs) {
+    for (final doc in snapshot.docs) {
       final subtema = (doc.data()['subtema'] ?? '').toString().trim();
       if (subtema.isNotEmpty) {
         set.add(subtema);
       }
     }
 
-    final lista = set.toList()..sort();
-
     if (!mounted) return;
 
     setState(() {
-      subtemas = lista;
-      if (!silencioso) {}
+      subtemas = set.toList()..sort();
     });
   }
 
@@ -348,30 +415,248 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
     );
   }
 
-  Future<void> selecionarImagemPergunta() async {
+  Widget _buildEditorCard({
+    required String titulo,
+    required quill.QuillController controller,
+    required FocusNode focusNode,
+    required ScrollController scrollController,
+    required String campo,
+    double altura = 220,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            titulo,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1E3A8A),
+              fontSize: 15,
+            ),
+          ),
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                quill.QuillToolbarHistoryButton(
+                  controller: controller,
+                  isUndo: true,
+                ),
+                quill.QuillToolbarHistoryButton(
+                  controller: controller,
+                  isUndo: false,
+                ),
+                quill.QuillToolbarToggleStyleButton(
+                  controller: controller,
+                  attribute: quill.Attribute.bold,
+                ),
+                quill.QuillToolbarToggleStyleButton(
+                  controller: controller,
+                  attribute: quill.Attribute.italic,
+                ),
+                quill.QuillToolbarToggleStyleButton(
+                  controller: controller,
+                  attribute: quill.Attribute.underline,
+                ),
+                quill.QuillToolbarClearFormatButton(
+                  controller: controller,
+                ),
+                quill.QuillToolbarColorButton(
+                  controller: controller,
+                  isBackground: false,
+                ),
+                quill.QuillToolbarColorButton(
+                  controller: controller,
+                  isBackground: true,
+                ),
+                quill.QuillToolbarToggleStyleButton(
+                  controller: controller,
+                  attribute: quill.Attribute.ol,
+                ),
+                quill.QuillToolbarToggleStyleButton(
+                  controller: controller,
+                  attribute: quill.Attribute.ul,
+                ),
+                quill.QuillToolbarLinkStyleButton(
+                  controller: controller,
+                ),
+                IconButton(
+                  tooltip: 'Inserir imagem',
+                  onPressed: () => _inserirImagemNoEditor(controller, campo),
+                  icon: const Icon(
+                    Icons.image_outlined,
+                    color: Color(0xFF1E3A8A),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            height: altura,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.black12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: quill.QuillEditor.basic(
+              controller: controller,
+              focusNode: focusNode,
+              scrollController: scrollController,
+              config: quill.QuillEditorConfig(
+                padding: const EdgeInsets.all(12),
+                placeholder: 'Digite o conteúdo de $titulo...',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _inserirImagemNoEditor(
+    quill.QuillController controller,
+    String campo,
+  ) async {
+    // #region agent log
+    await _debugLog(
+      hypothesisId: 'H1',
+      location: 'criar_flashcard_page.dart:457',
+      message: 'inserirImagem:start',
+      data: {'campo': campo},
+    );
+    // #endregion
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
-    if (image != null) {
-      setState(() {
-        imagemPergunta = File(image.path);
-      });
+
+    if (image == null) return;
+    if (!mounted) return;
+
+    try {
+      final bytes = await image.readAsBytes();
+      final nomeOriginal = image.name;
+      final extensao = nomeOriginal.contains('.')
+          ? nomeOriginal.split('.').last.toLowerCase()
+          : image.path.split('.').last.toLowerCase();
+      final nomeArquivo =
+          '${campo}_${DateTime.now().millisecondsSinceEpoch}.${extensao.isEmpty ? 'jpg' : extensao}';
+      // #region agent log
+      await _debugLog(
+        hypothesisId: 'H1',
+        location: 'criar_flashcard_page.dart:468',
+        message: 'inserirImagem:beforeUpload',
+        data: {
+          'campo': campo,
+          'imagePath': image.path,
+          'nomeArquivo': nomeArquivo,
+          'bytesLength': bytes.length,
+        },
+      );
+      // #endregion
+
+      final url = await firebaseService.uploadImagem(bytes, nomeArquivo);
+
+      if (url == null || !mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erro ao enviar imagem')),
+        );
+        return;
+      }
+
+      final selection = controller.selection;
+      final index = selection.baseOffset >= 0
+          ? selection.baseOffset
+          : controller.document.length;
+
+      controller.replaceText(
+        index,
+        0,
+        quill.BlockEmbed.image(url),
+        TextSelection.collapsed(offset: index + 1),
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Imagem inserida com sucesso!')),
+      );
+    } catch (e) {
+      // #region agent log
+      await _debugLog(
+        hypothesisId: 'H1',
+        location: 'criar_flashcard_page.dart:493',
+        message: 'inserirImagem:error',
+        data: {'campo': campo, 'error': e.toString()},
+      );
+      // #endregion
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao inserir imagem: $e')),
+      );
     }
   }
 
-  Future<void> selecionarImagemResposta() async {
-    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
-    if (image != null) {
-      setState(() {
-        imagemResposta = File(image.path);
-      });
+  Future<String> _getConteudoParaSalvar(
+    quill.QuillController controller,
+    {bool preservarFormatacao = false}
+  ) async {
+    if (preservarFormatacao) {
+      return jsonEncode(controller.document.toDelta().toJson());
     }
+    return controller.document.toPlainText().trim();
+  }
+
+  String _getTextoPlano(quill.QuillController controller) {
+    return controller.document.toPlainText().trim();
+  }
+
+  InputDecoration _decoracaoCampo(String label) {
+    return InputDecoration(
+      labelText: label,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+    );
   }
 
   Future<void> salvarCard() async {
     if (salvando) return;
 
-    final pergunta = perguntaController.text.trim();
-    final resposta = respostaController.text.trim();
-    final explicacao = explicacaoController.text.trim();
+    final pergunta = await _getConteudoParaSalvar(
+      perguntaController,
+      preservarFormatacao: true,
+    );
+    final resposta = await _getConteudoParaSalvar(
+      respostaController,
+      preservarFormatacao: true,
+    );
+    final explicacao = await _getConteudoParaSalvar(
+      explicacaoController,
+      preservarFormatacao: true,
+    );
+    final perguntaTextoPlano = _getTextoPlano(perguntaController);
+    final respostaTextoPlano = _getTextoPlano(respostaController);
+    // #region agent log
+    await _debugLog(
+      hypothesisId: 'H3',
+      location: 'criar_flashcard_page.dart:522',
+      message: 'salvarCard:collectedInputs',
+      data: {
+        'materia': materiaSelecionada,
+        'tema': temaSelecionado,
+        'subtema': subtemaSelecionado,
+        'perguntaLen': pergunta.length,
+        'respostaLen': resposta.length,
+        'explicacaoLen': explicacao.length,
+        'perguntaTextoPlanoLen': perguntaTextoPlano.length,
+        'respostaTextoPlanoLen': respostaTextoPlano.length,
+      },
+    );
+    // #endregion
 
     if (materiaSelecionada == null ||
         materiaSelecionada!.trim().isEmpty ||
@@ -379,13 +664,15 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
         temaSelecionado!.trim().isEmpty ||
         subtemaSelecionado == null ||
         subtemaSelecionado!.trim().isEmpty) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Preencha matéria, tema e subtema")),
       );
       return;
     }
 
-    if (pergunta.isEmpty || resposta.isEmpty) {
+    if (perguntaTextoPlano.isEmpty || respostaTextoPlano.isEmpty) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Preencha pergunta e resposta")),
       );
@@ -397,6 +684,14 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
     });
 
     try {
+      // #region agent log
+      await _debugLog(
+        hypothesisId: 'H4',
+        location: 'criar_flashcard_page.dart:548',
+        message: 'salvarCard:beforePersist',
+        data: {'modoEdicao': modoEdicao, 'cardId': widget.cardId},
+      );
+      // #endregion
       if (modoEdicao) {
         await firebaseService.atualizarCard(
           cardId: widget.cardId!,
@@ -406,10 +701,6 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
           pergunta: pergunta,
           resposta: resposta,
           explicacao: explicacao,
-          novaImagemPergunta: imagemPergunta,
-          novaImagemResposta: imagemResposta,
-          imagemPerguntaAtual: imagemPerguntaUrlAtual,
-          imagemRespostaAtual: imagemRespostaUrlAtual,
         );
       } else {
         await firebaseService.adicionarCard(
@@ -419,10 +710,16 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
           pergunta: pergunta,
           resposta: resposta,
           explicacao: explicacao,
-          imagemPergunta: imagemPergunta,
-          imagemResposta: imagemResposta,
         );
       }
+      // #region agent log
+      await _debugLog(
+        hypothesisId: 'H4',
+        location: 'criar_flashcard_page.dart:569',
+        message: 'salvarCard:afterPersist',
+        data: {'modoEdicao': modoEdicao},
+      );
+      // #endregion
 
       if (!mounted) return;
 
@@ -438,6 +735,14 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
 
       Navigator.pop(context, true);
     } catch (e) {
+      // #region agent log
+      await _debugLog(
+        hypothesisId: 'H4',
+        location: 'criar_flashcard_page.dart:583',
+        message: 'salvarCard:error',
+        data: {'error': e.toString()},
+      );
+      // #endregion
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -450,66 +755,6 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
         });
       }
     }
-  }
-
-  InputDecoration _decoracaoCampo(String label) {
-    return InputDecoration(
-      labelText: label,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-    );
-  }
-
-  Widget _buildPreviewImagem({
-    required String titulo,
-    required File? arquivo,
-    required String urlAtual,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            titulo,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF1E3A8A),
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (arquivo != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Image.file(
-                arquivo,
-                height: 180,
-                width: double.infinity,
-                fit: BoxFit.cover,
-              ),
-            )
-          else if (urlAtual.isNotEmpty)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Image.network(
-                urlAtual,
-                height: 180,
-                width: double.infinity,
-                fit: BoxFit.cover,
-              ),
-            )
-          else
-            const Text('Nenhuma imagem selecionada'),
-        ],
-      ),
-    );
   }
 
   @override
@@ -529,7 +774,7 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   DropdownButtonFormField<String>(
-                    value: materiaSelecionada,
+                    initialValue: materiaSelecionada,
                     decoration: _decoracaoCampo("Matéria"),
                     items: [
                       ...materias.map(
@@ -564,7 +809,7 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
-                    value: temaSelecionado,
+                    initialValue: temaSelecionado,
                     decoration: _decoracaoCampo("Tema"),
                     items: [
                       ...temas.map(
@@ -599,7 +844,7 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
-                    value: subtemaSelecionado,
+                    initialValue: subtemaSelecionado,
                     decoration: _decoracaoCampo("Subtema"),
                     items: [
                       ...subtemas.map(
@@ -624,67 +869,32 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
                       });
                     },
                   ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: perguntaController,
-                    maxLines: 3,
-                    decoration: _decoracaoCampo("Pergunta"),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: respostaController,
-                    maxLines: 3,
-                    decoration: _decoracaoCampo("Resposta"),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: explicacaoController,
-                    maxLines: 4,
-                    decoration: _decoracaoCampo("Explicação"),
-                  ),
                   const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: selecionarImagemPergunta,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: const Color(0xFF1E3A8A),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    child: Text(
-                      imagemPergunta == null
-                          ? (imagemPerguntaUrlAtual.isNotEmpty
-                              ? "Trocar imagem da pergunta"
-                              : "Selecionar imagem da pergunta")
-                          : "Imagem da pergunta selecionada",
-                    ),
-                  ),
-                                    const SizedBox(height: 10),
-                  _buildPreviewImagem(
-                    titulo: 'Prévia da imagem da pergunta',
-                    arquivo: imagemPergunta,
-                    urlAtual: imagemPerguntaUrlAtual,
+                  _buildEditorCard(
+                    titulo: "Pergunta",
+                    controller: perguntaController,
+                    focusNode: perguntaFocusNode,
+                    scrollController: perguntaScrollController,
+                    campo: "pergunta",
+                    altura: 240,
                   ),
                   const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: selecionarImagemResposta,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: const Color(0xFF1E3A8A),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    child: Text(
-                      imagemResposta == null
-                          ? (imagemRespostaUrlAtual.isNotEmpty
-                              ? "Trocar imagem da resposta"
-                              : "Selecionar imagem da resposta")
-                          : "Imagem da resposta selecionada",
-                    ),
+                  _buildEditorCard(
+                    titulo: "Resposta",
+                    controller: respostaController,
+                    focusNode: respostaFocusNode,
+                    scrollController: respostaScrollController,
+                    campo: "resposta",
+                    altura: 240,
                   ),
-                  const SizedBox(height: 10),
-                  _buildPreviewImagem(
-                    titulo: 'Prévia da imagem da resposta',
-                    arquivo: imagemResposta,
-                    urlAtual: imagemRespostaUrlAtual,
+                  const SizedBox(height: 16),
+                  _buildEditorCard(
+                    titulo: "Explicação",
+                    controller: explicacaoController,
+                    focusNode: explicacaoFocusNode,
+                    scrollController: explicacaoScrollController,
+                    campo: "explicacao",
+                    altura: 260,
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton(

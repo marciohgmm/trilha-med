@@ -257,7 +257,7 @@ class _AdminMateriasPageState extends State<AdminMateriasPage> {
           await Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => const CriarFlashcardPage(),
+              builder: (_) => CriarFlashcardPage(),
             ),
           );
         },

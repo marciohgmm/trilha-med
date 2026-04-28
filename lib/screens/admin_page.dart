@@ -157,7 +157,7 @@ class AdminPage extends StatelessWidget {
               await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => const CriarFlashcardPage(),
+                  builder: (context) => CriarFlashcardPage(),
                 ),
               );
             },
