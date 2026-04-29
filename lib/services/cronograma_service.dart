@@ -151,7 +151,7 @@ class CronogramaService {
 
       if (materia.isEmpty || tema.isEmpty || subtema.isEmpty) continue;
 
-      final key = '${materia}_${tema}_${subtema}';
+      final key = '$materia' '_$tema' '_$subtema';
 
       subtemasUnicos[key] = {
         'materia': materia,

@@ -122,8 +122,6 @@ class _LoginPageState extends State<LoginPage> {
         ),
       );
     } finally {
-      if (!mounted) return;
-
       setState(() {
         carregandoLogin = false;
       });

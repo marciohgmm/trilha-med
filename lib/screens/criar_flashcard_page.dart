@@ -578,10 +578,12 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
 
       final url = await firebaseService.uploadImagem(bytes, nomeArquivo);
 
-      if (url == null || !mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Erro ao enviar imagem')),
-        );
+      if (url == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Erro ao enviar imagem')),
+          );
+        }
         return;
       }
 
@@ -597,9 +599,11 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
         TextSelection.collapsed(offset: index + 1),
       );
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Imagem inserida com sucesso!')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Imagem inserida com sucesso!')),
+        );
+      }
     } catch (e) {
       // #region agent log
       await _debugLog(

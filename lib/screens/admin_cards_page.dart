@@ -323,7 +323,7 @@ class _AdminCardsPageState extends State<AdminCardsPage> {
                 child: ListTile(
                   contentPadding: const EdgeInsets.all(18),
                   leading: CircleAvatar(
-                    backgroundColor: const Color(0xFF1E3A8A).withOpacity(0.10),
+                    backgroundColor: const Color(0xFF1E3A8A).withValues(alpha: 0.10),
                     child: Icon(
                       selecionado ? Icons.check : Icons.style_outlined,
                       color: const Color(0xFF1E3A8A),

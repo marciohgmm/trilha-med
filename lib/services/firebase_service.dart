@@ -8,7 +8,6 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:universal_html/html.dart' as html;
-import 'dart:typed_data';
 
 /// Serviço que abstrai todas as operações de cards e arquivos.
 class FirebaseService {
@@ -189,7 +188,6 @@ class FirebaseService {
         data: {'error': e.toString()},
       );
       // #endregion
-      print('Erro ao salvar card: $e');
       rethrow;
     }
   }
@@ -252,7 +250,6 @@ class FirebaseService {
         'updatedAt': Timestamp.now(),
       });
     } catch (e) {
-      print('Erro ao atualizar card: $e');
       rethrow;
     }
   }
@@ -279,7 +276,6 @@ class FirebaseService {
 
       await _db.collection('flashcards').doc(cardId).delete();
     } catch (e) {
-      print('Erro ao excluir card: $e');
       rethrow;
     }
   }
@@ -296,7 +292,6 @@ class FirebaseService {
 
       await batch.commit();
     } catch (e) {
-      print('Erro ao excluir cards em lote: $e');
       rethrow;
     }
   }
@@ -354,13 +349,12 @@ class FirebaseService {
 
       final blob = html.Blob([bytes], 'application/json');
       final url = html.Url.createObjectUrlFromBlob(blob);
-      final anchor = html.AnchorElement(href: url)
+      html.AnchorElement(href: url)
         ..setAttribute('download', nomeArquivo)
         ..click();
 
       html.Url.revokeObjectUrl(url);
     } catch (e) {
-      print('Erro ao exportar cards: $e');
       rethrow;
     }
   }
@@ -449,7 +443,6 @@ class FirebaseService {
 
       return importados;
     } catch (e) {
-      print('Erro ao importar cards: $e');
       rethrow;
     }
   }
@@ -500,7 +493,6 @@ class FirebaseService {
         data: {'nomeArquivo': nomeArquivo, 'error': e.toString()},
       );
       // #endregion
-      print('Erro ao enviar imagem: $e');
       return null;
     }
   }
@@ -511,7 +503,7 @@ class FirebaseService {
       final ref = FirebaseStorage.instance.refFromURL(url);
       await ref.delete();
     } catch (e) {
-      print('Erro ao excluir arquivo do storage: $e');
+      // Ignorar erros ao excluir arquivo do storage, pois pode não existir
     }
   }
 }

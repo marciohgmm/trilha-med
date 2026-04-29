@@ -225,7 +225,7 @@ class _AdminSubtemasPageState extends State<AdminSubtemasPage> {
                     width: 52,
                     height: 52,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E3A8A).withOpacity(0.10),
+                      color: const Color(0xFF1E3A8A).withValues(alpha: 0.10),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: const Icon(

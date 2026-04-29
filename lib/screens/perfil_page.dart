@@ -85,8 +85,6 @@ class _PerfilPageState extends State<PerfilPage> {
         ),
       );
     } finally {
-      if (!mounted) return;
-
       setState(() {
         _salvando = false;
       });
@@ -200,29 +198,32 @@ class _PerfilPageState extends State<PerfilPage> {
                     'atualizadoEm': Timestamp.now(),
                   });
 
-                  if (!mounted) return;
+                  if (mounted) {
+                    // ignore: use_build_context_synchronously
+                    Navigator.pop(context);
 
-                  Navigator.pop(context);
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Mensagem enviada para a equipe com sucesso!',
+                    // ignore: use_build_context_synchronously
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Mensagem enviada para a equipe com sucesso!',
+                        ),
+                        backgroundColor: Colors.green,
                       ),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                } catch (e) {
-                  if (!mounted) return;
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Erro ao enviar mensagem: $e',
+                    );
+                  }
+                } on FirebaseException catch (e) {
+                  if (mounted) {
+                    // ignore: use_build_context_synchronously
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Erro ao enviar mensagem: $e',
+                        ),
+                        backgroundColor: Colors.red,
                       ),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
+                    );
+                  }
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -371,7 +372,7 @@ class _PerfilPageState extends State<PerfilPage> {
           width: 46,
           height: 46,
           decoration: BoxDecoration(
-            color: corIcone.withOpacity(0.12),
+            color: corIcone.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Icon(icon, color: corIcone),

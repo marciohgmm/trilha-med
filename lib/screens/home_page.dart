@@ -311,7 +311,7 @@ class _HomePageState extends State<HomePage> {
                                         height: 44,
                                         decoration: BoxDecoration(
                                           color: const Color(0xFF1E3A8A)
-                                              .withOpacity(0.1),
+                                              .withValues(alpha: 0.1),
                                           borderRadius:
                                               BorderRadius.circular(12),
                                         ),

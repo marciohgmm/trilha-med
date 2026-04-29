@@ -62,7 +62,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
               },
               height: 72,
               backgroundColor: Colors.white,
-              indicatorColor: const Color(0xFF1E3A8A).withOpacity(0.12),
+              indicatorColor: const Color(0xFF1E3A8A).withValues(alpha: 0.12),
               labelBehavior:
                   NavigationDestinationLabelBehavior.alwaysShow,
               destinations: const [

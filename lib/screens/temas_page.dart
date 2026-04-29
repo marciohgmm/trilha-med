@@ -102,7 +102,7 @@ class TemasPage extends StatelessWidget {
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.08),
+                          color: Colors.black.withValues(alpha: 0.08),
                           blurRadius: 16,
                           offset: const Offset(0, 6),
                         ),
@@ -185,7 +185,7 @@ class TemasPage extends StatelessWidget {
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
                                       color: const Color(0xFF1E3A8A)
-                                          .withOpacity(0.10),
+                                          .withValues(alpha: 0.10),
                                       borderRadius: BorderRadius.circular(14),
                                     ),
                                     child: const Icon(

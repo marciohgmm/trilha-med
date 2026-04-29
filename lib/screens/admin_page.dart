@@ -25,7 +25,7 @@ class AdminPage extends StatelessWidget {
           width: 52,
           height: 52,
           decoration: BoxDecoration(
-            color: const Color(0xFF1E3A8A).withOpacity(0.10),
+            color: const Color(0xFF1E3A8A).withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Icon(
@@ -157,7 +157,7 @@ class AdminPage extends StatelessWidget {
               await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => CriarFlashcardPage(),
+                  builder: (context) => const CriarFlashcardPage(),
                 ),
               );
             },
