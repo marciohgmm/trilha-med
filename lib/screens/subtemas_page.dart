@@ -1,17 +1,17 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import 'tela_flashcards.dart';
+import 'questoes_page.dart';
 
 class SubtemasPage extends StatelessWidget {
   final String userId;
-  final String materia;
+  final String? materia;
   final String tema;
 
   const SubtemasPage({
     super.key,
     required this.userId,
-    required this.materia,
+    this.materia,
     required this.tema,
   });
 
@@ -36,7 +36,7 @@ class SubtemasPage extends StatelessWidget {
       backgroundColor: const Color(0xFFF0F4F8),
       appBar: AppBar(
         title: Text(
-          '$tema - $materia',
+          materia != null ? '$tema - $materia' : tema,
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
@@ -47,11 +47,13 @@ class SubtemasPage extends StatelessWidget {
         centerTitle: true,
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('flashcards')
-            .where('materia', isEqualTo: materia)
-            .where('tema', isEqualTo: tema)
-            .snapshots(),
+        stream: () {
+          var query = FirebaseFirestore.instance.collection('questoes').where('tema', isEqualTo: tema);
+          if (materia != null) {
+            query = query.where('materia', isEqualTo: materia);
+          }
+          return query.snapshots();
+        }(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
@@ -122,7 +124,7 @@ class SubtemasPage extends StatelessWidget {
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          subtitle: Text('$total flashcards neste subtema'),
+                          subtitle: Text('$total questões neste subtema'),
                           trailing: const Icon(
                             Icons.arrow_forward_ios,
                             color: Color(0xFF1E3A8A),
@@ -131,7 +133,7 @@ class SubtemasPage extends StatelessWidget {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => TelaFlashcards(
+                                builder: (context) => QuestoesPage(
                                   userId: userId,
                                   materia: materia,
                                   tema: tema,

@@ -47,7 +47,7 @@ class TemasPage extends StatelessWidget {
       body: SafeArea(
         child: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
-              .collection('flashcards')
+              .collection('questoes')
               .where('materia', isEqualTo: materia)
               .snapshots(),
           builder: (context, snapshot) {

@@ -362,10 +362,11 @@ class FirebaseService {
   /// Importa cards de um arquivo JSON (dosados, evitando dados inválidos).
   Future<int> importarCardsJson() async {
     try {
-      final resultado = await FilePicker.pickFiles(
-  type: FileType.image,
-  withData: true,
-);
+      final resultado = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        withData: true,
+      );
 
       if (resultado == null || resultado.files.isEmpty) {
         return 0;

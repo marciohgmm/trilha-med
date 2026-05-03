@@ -13,10 +13,11 @@ dependencies:
   flutter_localizations:
     sdk: flutter
 
-  file_picker: ^11.0.2
+  file_picker: ^10.1.7
   path: ^1.9.0
   universal_html: ^2.2.4
   cupertino_icons: ^1.0.8
+  local_auth: ^2.1.5
   firebase_core: ^4.7.0
   firebase_auth: ^6.4.0
   url_launcher: ^6.3.1
@@ -31,6 +32,7 @@ dependencies:
   flutter_quill: 11.5.0
 
   flutter_html: ^3.0.0-beta.2
+  audioplayers: ^6.6.0
 
 dev_dependencies:
   flutter_test:
@@ -42,3 +44,4 @@ flutter:
 
   assets:
     - assets/images/
+    - assets/sounds/beep.mp3

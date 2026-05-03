@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'login_page.dart';
+import '../services/study_timer_service.dart';
 
 class PerfilPage extends StatefulWidget {
   final String userId;
@@ -23,8 +24,33 @@ class _PerfilPageState extends State<PerfilPage> {
 
   bool _salvando = false;
 
+  // Configurações de estudo
+  final StudyTimerService _timerService = StudyTimerService();
+  bool _enablePauseReminder = true;
+  int _studyDuration = 50;
+  int _pauseDuration = 10;
+  bool _enableSound = true;
+  bool _showFloatingClock = true;
+
   FirebaseFirestore get _firestore => FirebaseFirestore.instance;
   FirebaseAuth get _auth => FirebaseAuth.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTimerSettings();
+  }
+
+  Future<void> _loadTimerSettings() async {
+    await _timerService.loadSettings();
+    setState(() {
+      _enablePauseReminder = _timerService.enablePauseReminder;
+      _studyDuration = _timerService.studyDuration.inMinutes;
+      _pauseDuration = _timerService.pauseDuration.inMinutes;
+      _enableSound = _timerService.enableSound;
+      _showFloatingClock = _timerService.showFloatingClock;
+    });
+  }
 
   String _iniciais(String nome, String email) {
     final nomeLimpo = nome.trim();
@@ -298,6 +324,21 @@ class _PerfilPageState extends State<PerfilPage> {
         );
       },
     );
+  }
+
+  Future<void> _salvarConfiguracoesEstudo() async {
+    await _timerService.saveSettings(
+      studyDuration: _studyDuration,
+      pauseDuration: _pauseDuration,
+      enableSound: _enableSound,
+      showFloatingClock: _showFloatingClock,
+      enablePauseReminder: _enablePauseReminder,
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Configurações de estudo salvas!')),
+      );
+    }
   }
 
   Future<void> _confirmarLogout() async {
@@ -595,6 +636,69 @@ class _PerfilPageState extends State<PerfilPage> {
                         onTap: _abrirSobreApp,
                         corIcone:
                             const Color(0xFF7C3AED),
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Configurações de Estudo',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1E3A8A),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SwitchListTile(
+                        title: const Text('Ativar lembrete de pausa'),
+                        value: _enablePauseReminder,
+                        onChanged: (value) => setState(() => _enablePauseReminder = value),
+                      ),
+                      ListTile(
+                        title: const Text('Tempo de estudo'),
+                        subtitle: Text('$_studyDuration minutos'),
+                        trailing: DropdownButton<int>(
+                          value: _studyDuration,
+                          items: [25, 50, 75, 90].map((int value) {
+                            return DropdownMenuItem<int>(
+                              value: value,
+                              child: Text('$value min'),
+                            );
+                          }).toList(),
+                          onChanged: (value) => setState(() => _studyDuration = value!),
+                        ),
+                      ),
+                      ListTile(
+                        title: const Text('Tempo de pausa'),
+                        subtitle: Text('$_pauseDuration minutos'),
+                        trailing: DropdownButton<int>(
+                          value: _pauseDuration,
+                          items: [5, 10, 15, 20].map((int value) {
+                            return DropdownMenuItem<int>(
+                              value: value,
+                              child: Text('$value min'),
+                            );
+                          }).toList(),
+                          onChanged: (value) => setState(() => _pauseDuration = value!),
+                        ),
+                      ),
+                      SwitchListTile(
+                        title: const Text('Ativar som'),
+                        value: _enableSound,
+                        onChanged: (value) => setState(() => _enableSound = value),
+                      ),
+                      SwitchListTile(
+                        title: const Text('Mostrar relógio flutuante'),
+                        value: _showFloatingClock,
+                        onChanged: (value) => setState(() => _showFloatingClock = value),
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: _salvarConfiguracoesEstudo,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1E3A8A),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        child: const Text('Salvar Configurações de Estudo'),
                       ),
                       const SizedBox(height: 12),
                       OutlinedButton.icon(

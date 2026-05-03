@@ -4,6 +4,11 @@ import 'dart:convert';
 import 'package:flutter/gestures.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'cronograma_page.dart';
+import 'questoes_por_tema_page.dart';
+import '../services/study_timer_service.dart';
+import '../widgets/study_timer_overlay.dart';
+
 class TelaFlashcards extends StatefulWidget {
   final String userId;
   final String materia;
@@ -27,6 +32,94 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
   bool mostrandoResposta = false;
   bool salvando = false;
   bool enviandoReport = false;
+
+  final StudyTimerService _timerService = StudyTimerService();
+
+  @override
+  void initState() {
+    super.initState();
+    _timerService.loadSettings().then((_) {
+      _timerService.iniciarEstudo();
+    });
+    _timerService.alertStream.listen((alert) {
+      if (alert == 'pause_reminder') {
+        _mostrarAlertaPausa();
+      } else if (alert == 'pause_end') {
+        _mostrarFimPausa();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timerService.pausarEstudo();
+    super.dispose();
+  }
+
+  void _mostrarAlertaPausa() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('⏱️ Você estudou por 50 minutos. Faça uma pausa de 10 minutos.'),
+        duration: const Duration(seconds: 10),
+        action: SnackBarAction(
+          label: 'Pausar agora',
+          onPressed: () {
+            _timerService.pausarEstudo();
+            _timerService.iniciarPausa();
+            _mostrarCronometroPausa();
+          },
+        ),
+      ),
+    );
+  }
+
+  void _mostrarCronometroPausa() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StreamBuilder<Duration>(
+        stream: _timerService.pauseTimeStream,
+        builder: (context, snapshot) {
+          final remaining = snapshot.data ?? _timerService.pauseTime;
+          final minutes = remaining.inMinutes;
+          final seconds = remaining.inSeconds % 60;
+
+          return AlertDialog(
+            title: const Text('Pausa em andamento'),
+            content: Text(
+              'Tempo restante: ${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}',
+              style: const TextStyle(fontSize: 24),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  _timerService.cancelarPausa();
+                  Navigator.of(context).pop();
+                  _timerService.iniciarEstudo();
+                },
+                child: const Text('Voltar a estudar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _mostrarFimPausa() {
+    Navigator.of(context).pop(); // Fechar dialog de pausa
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('⏱️ Pausa finalizada. Hora de voltar aos estudos!'),
+        action: SnackBarAction(
+          label: 'Voltar a estudar',
+          onPressed: () {
+            _timerService.iniciarEstudo();
+          },
+        ),
+      ),
+    );
+  }
 
   String _normalizarConteudoRichText(dynamic valor) {
     final texto = (valor ?? '').toString();
@@ -462,14 +555,16 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
         foregroundColor: Colors.white,
       ),
       body: SafeArea(
-        child: StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('flashcards')
-              .where('materia', isEqualTo: widget.materia)
-              .where('tema', isEqualTo: widget.tema)
-              .where('subtema', isEqualTo: widget.subtema)
-              .snapshots(),
-          builder: (context, snapshot) {
+        child: Stack(
+          children: [
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('flashcards')
+                  .where('materia', isEqualTo: widget.materia)
+                  .where('tema', isEqualTo: widget.tema)
+                  .where('subtema', isEqualTo: widget.subtema)
+                  .snapshots(),
+              builder: (context, snapshot) {
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
@@ -585,6 +680,65 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
                                 'Reportar erro no card $indiceCard/${docs.length}',
                               ),
                             ),
+                            if (indiceAtual == docs.length - 1) ...[
+                              const SizedBox(height: 16),
+                              const Divider(),
+                              const SizedBox(height: 16),
+                              const Text(
+                                'Último card alcançado',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 12,
+                                runSpacing: 12,
+                                children: [
+                                  _FooterActionButton(
+                                    texto: 'Ir para questões deste tema',
+                                    icone: Icons.quiz,
+                                    cor: const Color(0xFF1E3A8A),
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => QuestoesPorTemaPage(
+                                            userId: widget.userId,
+                                            materia: widget.materia,
+                                            tema: widget.tema,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  _FooterActionButton(
+                                    texto: 'Voltar para cronograma',
+                                    icone: Icons.schedule,
+                                    cor: Colors.blueGrey,
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => CronogramaPage(
+                                            userId: widget.userId,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  _FooterActionButton(
+                                    texto: 'Voltar para tela inicial',
+                                    icone: Icons.home,
+                                    cor: const Color(0xFF1E3A8A),
+                                    onPressed: () {
+                                      Navigator.popUntil(context, (route) => route.isFirst);
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
                         ],
                       ),
@@ -693,6 +847,9 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
             );
           },
         ),
+            const StudyTimerOverlay(),
+          ],
+        ),
       ),
     );
   }
@@ -724,6 +881,37 @@ class _BotaoDificuldade extends StatelessWidget {
       child: Text(
         texto,
         style: const TextStyle(fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+}
+
+class _FooterActionButton extends StatelessWidget {
+  final String texto;
+  final IconData icone;
+  final Color cor;
+  final VoidCallback onPressed;
+
+  const _FooterActionButton({
+    required this.texto,
+    required this.icone,
+    required this.cor,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icone, size: 20),
+      label: Text(texto),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: cor,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
       ),
     );
   }

@@ -2,12 +2,12 @@ import 'dart:io';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/services/firebase_service.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:http/http.dart' as http;
-import 'package:image_picker/image_picker.dart';
 
 class CriarFlashcardPage extends StatefulWidget {
   final String? cardId;
@@ -40,7 +40,6 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
   final ScrollController explicacaoScrollController = ScrollController();
 
   final FirebaseService firebaseService = FirebaseService();
-  final ImagePicker picker = ImagePicker();
 
   List<String> materias = [];
   List<String> temas = [];
@@ -533,49 +532,63 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
       data: {'campo': campo},
     );
     // #endregion
-    final XFile? image = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
+
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
     );
 
-    if (image == null) return;
+    if (result == null || result.files.isEmpty) return;
     if (!mounted) return;
 
-    try {
-      final bytes = await image.readAsBytes();
-      final nomeOriginal = image.name;
-      final extensao = nomeOriginal.contains('.')
-          ? nomeOriginal.split('.').last.toLowerCase()
-          : image.path.split('.').last.toLowerCase();
-
-      // Validar extensão
-      if (!['jpg', 'jpeg'].contains(extensao)) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Por favor, selecione uma imagem em formato JPG ou JPEG'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-        return;
-      }
-
-      final nomeArquivo =
-          '${campo}_${DateTime.now().millisecondsSinceEpoch}.${extensao.isEmpty ? 'jpg' : extensao}';
-      // #region agent log
-      await _debugLog(
-        hypothesisId: 'H1',
-        location: 'criar_flashcard_page.dart:468',
-        message: 'inserirImagem:beforeUpload',
-        data: {
-          'campo': campo,
-          'imagePath': image.path,
-          'nomeArquivo': nomeArquivo,
-          'bytesLength': bytes.length,
-        },
+    final pickedFile = result.files.single;
+    final bytes = pickedFile.bytes ??
+        (pickedFile.path != null ? await File(pickedFile.path!).readAsBytes() : null);
+    if (bytes == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível carregar a imagem.')),
       );
-      // #endregion
+      return;
+    }
 
+    final nomeOriginal = pickedFile.name;
+    final extensao = nomeOriginal.contains('.')
+        ? nomeOriginal.split('.').last.toLowerCase()
+        : 'jpg';
+
+    final validExtensions = ['jpg', 'jpeg', 'png', 'heic', 'heif'];
+
+    if (!validExtensions.contains(extensao)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Por favor, selecione uma imagem em formato JPG, JPEG, PNG, HEIC ou HEIF',
+          ),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final nomeArquivo =
+        '${campo}_${DateTime.now().millisecondsSinceEpoch}.${extensao.isEmpty ? 'jpg' : extensao}';
+    // #region agent log
+    await _debugLog(
+      hypothesisId: 'H1',
+      location: 'criar_flashcard_page.dart:468',
+      message: 'inserirImagem:beforeUpload',
+      data: {
+        'campo': campo,
+        'fileName': nomeOriginal,
+        'nomeArquivo': nomeArquivo,
+        'bytesLength': bytes.length,
+      },
+    );
+    // #endregion
+
+    try {
       final url = await firebaseService.uploadImagem(bytes, nomeArquivo);
 
       if (url == null) {

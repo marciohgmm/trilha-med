@@ -1,13 +1,14 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import '../screens/admin_page.dart';
-import '../screens/login_page.dart';
-import 'temas_page.dart';
+import 'admin_page.dart';
+import 'login_page.dart';
 import 'cronograma_page.dart';
+import 'questoes_por_tema_page.dart';
+import 'temas_page.dart';
 import 'busca_flashcard_delegate.dart';
 
 class HomePage extends StatefulWidget {
@@ -22,29 +23,31 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   Timer? _adminPressTimer;
 
-  Future<void> fazerLogout() async {
-    await FirebaseAuth.instance.signOut();
-    if (!mounted) return;
-
-    Navigator.pushAndRemoveUntil(
+  void _abrirFlashcards() {
+    Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const LoginPage()),
-      (route) => false,
+      MaterialPageRoute(
+        builder: (_) => HomeDashboardPage(userId: widget.userId),
+      ),
     );
   }
 
-  Map<String, int> _agruparMaterias(List<QueryDocumentSnapshot> docs) {
-    final Map<String, int> mapa = {};
+  void _abrirQuestoes() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => QuestoesPorTemaPage(userId: widget.userId),
+      ),
+    );
+  }
 
-    for (final doc in docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final materia = (data['materia'] ?? '').toString().trim();
-      if (materia.isNotEmpty) {
-        mapa[materia] = (mapa[materia] ?? 0) + 1;
-      }
-    }
-
-    return mapa;
+  void _mostrarSnackBarEmDesenvolvimento() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Em desenvolvimento'),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
 
   void _iniciarPressaoAdmin(Map<String, dynamic> dadosUsuario) {
@@ -93,8 +96,6 @@ class _HomePageState extends State<HomePage> {
           dadosUsuario = userSnapshot.data!.data() as Map<String, dynamic>;
         }
 
-        final Map<String, dynamic> progressoUsuario =
-            dadosUsuario['progresso'] ?? {};
         final bool isAdmin = dadosUsuario['isAdmin'] == true;
 
         return Scaffold(
@@ -108,7 +109,7 @@ class _HomePageState extends State<HomePage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    'Preparação Revalida',
+                    'Trilha Med',
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -124,6 +125,184 @@ class _HomePageState extends State<HomePage> {
                     ),
                 ],
               ),
+            ),
+            centerTitle: true,
+            backgroundColor: const Color(0xFF1E3A8A),
+            foregroundColor: Colors.white,
+          ),
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Escolha como deseja estudar',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1E3A8A),
+                    ),
+                  ),
+                  const SizedBox(height: 36),
+                  ElevatedButton.icon(
+                    onPressed: _abrirFlashcards,
+                    icon: const Icon(Icons.style, size: 26),
+                    label: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16.0),
+                      child: Text(
+                        'Estudar por Flashcards',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1E3A8A),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      elevation: 8,
+                      shadowColor: Colors.black26,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  ElevatedButton.icon(
+                    onPressed: _abrirQuestoes,
+                    icon: const Icon(Icons.quiz, size: 26),
+                    label: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16.0),
+                      child: Text(
+                        'Estudar por Questões',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.shade700,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      elevation: 8,
+                      shadowColor: Colors.black26,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  ElevatedButton.icon(
+                    onPressed: _mostrarSnackBarEmDesenvolvimento,
+                    icon: const Icon(Icons.medical_services, size: 26),
+                    label: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16.0),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Simulação Prática',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            'Em breve',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+                          ),
+                        ],
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.shade700,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      elevation: 8,
+                      shadowColor: Colors.black26,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class HomeDashboardPage extends StatefulWidget {
+  final String userId;
+
+  const HomeDashboardPage({super.key, required this.userId});
+
+  @override
+  State<HomeDashboardPage> createState() => _HomeDashboardPageState();
+}
+
+class _HomeDashboardPageState extends State<HomeDashboardPage> {
+  Future<void> fazerLogout() async {
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (route) => false,
+    );
+  }
+
+  Map<String, int> _agruparMaterias(List<QueryDocumentSnapshot> docs) {
+    final Map<String, int> mapa = {};
+
+    for (final doc in docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final materia = (data['materia'] ?? '').toString().trim();
+      if (materia.isNotEmpty) {
+        mapa[materia] = (mapa[materia] ?? 0) + 1;
+      }
+    }
+
+    return mapa;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userId)
+          .snapshots(),
+      builder: (context, userSnapshot) {
+        Map<String, dynamic> dadosUsuario = {};
+
+        if (userSnapshot.hasData && userSnapshot.data!.data() != null) {
+          dadosUsuario = userSnapshot.data!.data() as Map<String, dynamic>;
+        }
+
+        final Map<String, dynamic> progressoUsuario =
+            dadosUsuario['progresso'] ?? {};
+        final bool isAdmin = dadosUsuario['isAdmin'] == true;
+
+        return Scaffold(
+          backgroundColor: const Color(0xFFF0F4F8),
+          appBar: AppBar(
+            title: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Preparação Revalida',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                if (isAdmin)
+                  const Text(
+                    'Bom estudo!',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11,
+                    ),
+                  ),
+              ],
             ),
             backgroundColor: const Color(0xFF1E3A8A),
             foregroundColor: Colors.white,

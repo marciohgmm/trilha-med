@@ -1,8 +1,10 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../services/biometria/biometria_service.dart';
 import 'main_navigation_page.dart';
 import 'register_screen.dart';
 
@@ -18,9 +20,45 @@ class _LoginPageState extends State<LoginPage> {
   final senhaController = TextEditingController();
   final emailRecuperacaoController = TextEditingController();
 
+  final BiometriaService _biometriaService = BiometriaService();
+  bool usuarioJaLogado = true; // simulação inicial
+  bool _dispositivoSuportaBiometria = false;
+
   bool exibirRecuperacao = false;
   bool carregandoLogin = false;
   bool mostrarSenha = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _verificarBiometria();
+  }
+
+  Future<void> _verificarBiometria() async {
+    final suporta = await _biometriaService.dispositivoSuportaBiometria();
+    if (!mounted) return;
+
+    setState(() {
+      _dispositivoSuportaBiometria = suporta;
+    });
+  }
+
+  Future<void> _loginComBiometria() async {
+    final autenticado = await _biometriaService.autenticarComBiometria();
+    if (!mounted) return;
+
+    if (autenticado) {
+      Navigator.pushReplacementNamed(context, '/home');
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Autenticação biométrica falhou. Tente novamente."),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
 
   Future<void> login() async {
     final email = emailController.text.trim();
@@ -281,7 +319,8 @@ class _LoginPageState extends State<LoginPage> {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFF1E3A8A),
                                   foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 15),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 15),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(14),
                                   ),
@@ -372,7 +411,8 @@ class _LoginPageState extends State<LoginPage> {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFF1E3A8A),
                                   foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 15),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 15),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(14),
                                   ),
@@ -392,13 +432,42 @@ class _LoginPageState extends State<LoginPage> {
                                       ),
                               ),
                             ),
+                            if (usuarioJaLogado && _dispositivoSuportaBiometria && !kIsWeb)
+                              Column(
+                                children: [
+                                  const SizedBox(height: 12),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      onPressed: _loginComBiometria,
+                                      icon: const Icon(Icons.fingerprint),
+                                      label: const Text(
+                                        "Entrar com biometria",
+                                        style: TextStyle(fontSize: 16),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor:
+                                            const Color(0xFF1E3A8A),
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 15),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(14),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             const SizedBox(height: 14),
                             TextButton(
                               onPressed: () {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => const RegisterScreen(),
+                                    builder: (context) =>
+                                        const RegisterScreen(),
                                   ),
                                 );
                               },
