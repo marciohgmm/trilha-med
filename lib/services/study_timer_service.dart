@@ -21,6 +21,8 @@ class StudyTimerService {
   bool _enableSound = true;
   bool _showFloatingClock = true;
   bool _enablePauseReminder = true;
+  int _themeModeIndex = 2; // 0 = Claro, 1 = Escuro, 2 = Automático
+  int _fontSize = 16;
 
   final AudioPlayer _audioPlayer = AudioPlayer();
 
@@ -42,6 +44,8 @@ class StudyTimerService {
   Duration get pauseDuration => _pauseDuration;
   bool get enableSound => _enableSound;
   bool get showFloatingClock => _showFloatingClock;
+  int get themeModeIndex => _themeModeIndex;
+  int get fontSize => _fontSize;
 
   Future<void> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
@@ -50,6 +54,8 @@ class StudyTimerService {
     _enableSound = prefs.getBool('enableSound') ?? true;
     _showFloatingClock = prefs.getBool('showFloatingClock') ?? true;
     _enablePauseReminder = prefs.getBool('enablePauseReminder') ?? true;
+    _themeModeIndex = prefs.getInt('themeModeIndex') ?? 2;
+    _fontSize = prefs.getInt('fontSize') ?? 16;
   }
 
   Future<void> saveSettings({
@@ -58,6 +64,8 @@ class StudyTimerService {
     bool? enableSound,
     bool? showFloatingClock,
     bool? enablePauseReminder,
+    int? themeModeIndex,
+    int? fontSize,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     if (studyDuration != null) {
@@ -79,6 +87,14 @@ class StudyTimerService {
     if (enablePauseReminder != null) {
       _enablePauseReminder = enablePauseReminder;
       await prefs.setBool('enablePauseReminder', enablePauseReminder);
+    }
+    if (themeModeIndex != null) {
+      _themeModeIndex = themeModeIndex;
+      await prefs.setInt('themeModeIndex', themeModeIndex);
+    }
+    if (fontSize != null) {
+      _fontSize = fontSize;
+      await prefs.setInt('fontSize', fontSize);
     }
   }
 

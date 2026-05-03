@@ -31,6 +31,16 @@ class _PerfilPageState extends State<PerfilPage> {
   int _pauseDuration = 10;
   bool _enableSound = true;
   bool _showFloatingClock = true;
+  bool _showRelogioConfig = false;
+  int _themeModeIndex = 2;
+  int _fontSize = 16;
+
+  static const List<String> _themeModeLabels = [
+    'Claro',
+    'Escuro',
+    'Automático',
+  ];
+  static const List<int> _fontSizeOptions = [14, 16, 18, 20, 22];
 
   FirebaseFirestore get _firestore => FirebaseFirestore.instance;
   FirebaseAuth get _auth => FirebaseAuth.instance;
@@ -49,6 +59,8 @@ class _PerfilPageState extends State<PerfilPage> {
       _pauseDuration = _timerService.pauseDuration.inMinutes;
       _enableSound = _timerService.enableSound;
       _showFloatingClock = _timerService.showFloatingClock;
+      _themeModeIndex = _timerService.themeModeIndex;
+      _fontSize = _timerService.fontSize;
     });
   }
 
@@ -333,11 +345,86 @@ class _PerfilPageState extends State<PerfilPage> {
       enableSound: _enableSound,
       showFloatingClock: _showFloatingClock,
       enablePauseReminder: _enablePauseReminder,
+      themeModeIndex: _themeModeIndex,
+      fontSize: _fontSize,
     );
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Configurações de estudo salvas!')),
       );
+    }
+  }
+
+  Future<void> _abrirDialogoTema() async {
+    final selecionado = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Modo escuro / claro'),
+          content: RadioGroup<int>(
+            groupValue: _themeModeIndex,
+            onChanged: (value) {
+              if (value != null) Navigator.of(context).pop(value);
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: List<Widget>.generate(
+                _themeModeLabels.length,
+                (index) => ListTile(
+                  title: Text(_themeModeLabels[index]),
+                  trailing: Radio<int>(
+                    value: index,
+                  ),
+                  onTap: () => Navigator.of(context).pop(index),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selecionado != null) {
+      setState(() {
+        _themeModeIndex = selecionado;
+      });
+    }
+  }
+
+  Future<void> _abrirDialogoTamanhoFonte() async {
+    final selecionado = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Tamanho da fonte'),
+          content: RadioGroup<int>(
+            groupValue: _fontSize,
+            onChanged: (value) {
+              if (value != null) Navigator.of(context).pop(value);
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: _fontSizeOptions.map(
+                (value) {
+                  return ListTile(
+                    title: Text('$value pt'),
+                    trailing: Radio<int>(
+                      value: value,
+                    ),
+                    onTap: () => Navigator.of(context).pop(value),
+                  );
+                },
+              ).toList(),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selecionado != null) {
+      setState(() {
+        _fontSize = selecionado;
+      });
     }
   }
 
@@ -639,7 +726,7 @@ class _PerfilPageState extends State<PerfilPage> {
                       ),
                       const SizedBox(height: 24),
                       const Text(
-                        'Configurações de Estudo',
+                        'Configurações',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -647,59 +734,106 @@ class _PerfilPageState extends State<PerfilPage> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      SwitchListTile(
-                        title: const Text('Ativar lembrete de pausa'),
-                        value: _enablePauseReminder,
-                        onChanged: (value) => setState(() => _enablePauseReminder = value),
+                      _buildAcaoTile(
+                        icon: Icons.brightness_6,
+                        titulo: 'Modo escuro / claro',
+                        subtitulo:
+                            'Manual ou automático: ${_themeModeLabels[_themeModeIndex]}',
+                        onTap: _abrirDialogoTema,
+                        corIcone: const Color(0xFF1F2937),
                       ),
-                      ListTile(
-                        title: const Text('Tempo de estudo'),
-                        subtitle: Text('$_studyDuration minutos'),
-                        trailing: DropdownButton<int>(
-                          value: _studyDuration,
-                          items: [25, 50, 75, 90].map((int value) {
-                            return DropdownMenuItem<int>(
-                              value: value,
-                              child: Text('$value min'),
-                            );
-                          }).toList(),
-                          onChanged: (value) => setState(() => _studyDuration = value!),
+                      _buildAcaoTile(
+                        icon: Icons.text_fields,
+                        titulo: 'Tamanho da fonte',
+                        subtitulo: 'Atualmente ${_fontSize}pt',
+                        onTap: _abrirDialogoTamanhoFonte,
+                        corIcone: const Color(0xFF4B5563),
+                      ),
+                      _buildAcaoTile(
+                        icon: Icons.access_time,
+                        titulo: 'Relógio',
+                        subtitulo:
+                            'Ajustar tempo e opções de relógio flutuante',
+                        onTap: () => setState(() {
+                          _showRelogioConfig = !_showRelogioConfig;
+                        }),
+                        corIcone: const Color(0xFF1E40AF),
+                      ),
+                      if (_showRelogioConfig) ...[
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x11000000),
+                                blurRadius: 14,
+                                offset: Offset(0, 6),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SwitchListTile(
+                                title: const Text('Ativar lembrete de pausa'),
+                                value: _enablePauseReminder,
+                                onChanged: (value) => setState(() => _enablePauseReminder = value),
+                              ),
+                              ListTile(
+                                title: const Text('Tempo de estudo'),
+                                subtitle: Text('$_studyDuration minutos'),
+                                trailing: DropdownButton<int>(
+                                  value: _studyDuration,
+                                  items: [25, 50, 75, 90].map((int value) {
+                                    return DropdownMenuItem<int>(
+                                      value: value,
+                                      child: Text('$value min'),
+                                    );
+                                  }).toList(),
+                                  onChanged: (value) => setState(() => _studyDuration = value!),
+                                ),
+                              ),
+                              ListTile(
+                                title: const Text('Tempo de pausa'),
+                                subtitle: Text('$_pauseDuration minutos'),
+                                trailing: DropdownButton<int>(
+                                  value: _pauseDuration,
+                                  items: [5, 10, 15, 20].map((int value) {
+                                    return DropdownMenuItem<int>(
+                                      value: value,
+                                      child: Text('$value min'),
+                                    );
+                                  }).toList(),
+                                  onChanged: (value) => setState(() => _pauseDuration = value!),
+                                ),
+                              ),
+                              SwitchListTile(
+                                title: const Text('Ativar som'),
+                                value: _enableSound,
+                                onChanged: (value) => setState(() => _enableSound = value),
+                              ),
+                              SwitchListTile(
+                                title: const Text('Mostrar relógio flutuante'),
+                                value: _showFloatingClock,
+                                onChanged: (value) => setState(() => _showFloatingClock = value),
+                              ),
+                              const SizedBox(height: 16),
+                              ElevatedButton(
+                                onPressed: _salvarConfiguracoesEstudo,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF1E3A8A),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                ),
+                                child: const Text('Salvar configurações do relógio'),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      ListTile(
-                        title: const Text('Tempo de pausa'),
-                        subtitle: Text('$_pauseDuration minutos'),
-                        trailing: DropdownButton<int>(
-                          value: _pauseDuration,
-                          items: [5, 10, 15, 20].map((int value) {
-                            return DropdownMenuItem<int>(
-                              value: value,
-                              child: Text('$value min'),
-                            );
-                          }).toList(),
-                          onChanged: (value) => setState(() => _pauseDuration = value!),
-                        ),
-                      ),
-                      SwitchListTile(
-                        title: const Text('Ativar som'),
-                        value: _enableSound,
-                        onChanged: (value) => setState(() => _enableSound = value),
-                      ),
-                      SwitchListTile(
-                        title: const Text('Mostrar relógio flutuante'),
-                        value: _showFloatingClock,
-                        onChanged: (value) => setState(() => _showFloatingClock = value),
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _salvarConfiguracoesEstudo,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1E3A8A),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                        child: const Text('Salvar Configurações de Estudo'),
-                      ),
+                      ],
                       const SizedBox(height: 12),
                       OutlinedButton.icon(
                         onPressed: _confirmarLogout,

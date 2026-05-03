@@ -8,15 +8,17 @@ class BiometriaService {
     try {
       final canCheckBiometrics = await _autenticador.canCheckBiometrics;
       final deviceSupported = await _autenticador.isDeviceSupported();
+      final availableBiometrics = await _autenticador.getAvailableBiometrics();
 
-      final suporta = canCheckBiometrics || deviceSupported;
+      final suporta = availableBiometrics.isNotEmpty || deviceSupported;
 
-      if (!suporta) {
-        debugPrint(
-          '[BiometriaService] Dispositivo não suporta biometria segura: '
-          'canCheckBiometrics=$canCheckBiometrics, isDeviceSupported=$deviceSupported',
-        );
-      }
+      debugPrint(
+        '[BiometriaService] Suporte a biometria: '
+        'canCheckBiometrics=$canCheckBiometrics, '
+        'isDeviceSupported=$deviceSupported, '
+        'availableBiometrics=$availableBiometrics, '
+        'suporta=$suporta',
+      );
 
       return suporta;
     } catch (e, stackTrace) {
@@ -28,7 +30,10 @@ class BiometriaService {
 
   Future<bool> autenticarComBiometria() async {
     try {
-      final suporta = await dispositivoSuportaBiometria();
+      final availableBiometrics = await _autenticador.getAvailableBiometrics();
+      final deviceSupported = await _autenticador.isDeviceSupported();
+      final suporta = availableBiometrics.isNotEmpty || deviceSupported;
+
       if (!suporta) {
         debugPrint('[BiometriaService] Autenticação cancelada: dispositivo sem suporte.');
         return false;
@@ -36,11 +41,9 @@ class BiometriaService {
 
       final autenticado = await _autenticador.authenticate(
         localizedReason: 'Use sua biometria ou método do dispositivo para continuar',
-        options: const AuthenticationOptions(
-          biometricOnly: false,
-          stickyAuth: true,
-          useErrorDialogs: true,
-        ),
+        biometricOnly: availableBiometrics.isNotEmpty,
+        persistAcrossBackgrounding: false,
+        sensitiveTransaction: true,
       );
 
       return autenticado;
