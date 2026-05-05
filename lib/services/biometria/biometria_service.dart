@@ -40,7 +40,8 @@ class BiometriaService {
       }
 
       final autenticado = await _autenticador.authenticate(
-        localizedReason: 'Use sua biometria ou método do dispositivo para continuar',
+        localizedReason:
+            'Use sua biometria ou método do dispositivo para continuar',
         biometricOnly: availableBiometrics.isNotEmpty,
         persistAcrossBackgrounding: false,
         sensitiveTransaction: true,

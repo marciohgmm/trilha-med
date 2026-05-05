@@ -6,11 +6,13 @@ import 'subtemas_page.dart';
 class TemasPage extends StatelessWidget {
   final String userId;
   final String materia;
+  final String collectionName;
 
   const TemasPage({
     super.key,
     required this.userId,
     required this.materia,
+    this.collectionName = 'flashcards',
   });
 
   Map<String, int> _agruparTemas(List<QueryDocumentSnapshot> docs) {
@@ -47,7 +49,7 @@ class TemasPage extends StatelessWidget {
       body: SafeArea(
         child: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
-              .collection('questoes')
+              .collection(collectionName)
               .where('materia', isEqualTo: materia)
               .snapshots(),
           builder: (context, snapshot) {
@@ -173,6 +175,7 @@ class TemasPage extends StatelessWidget {
                                     userId: userId,
                                     materia: materia,
                                     tema: tema,
+                                    collectionName: collectionName,
                                   ),
                                 ),
                               );
@@ -209,7 +212,7 @@ class TemasPage extends StatelessWidget {
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
-                                          '$total flashcards neste tema',
+                                          '$total ${collectionName == 'questoes' ? 'questões' : 'flashcards'} neste tema',
                                           style: TextStyle(
                                             fontSize: 13,
                                             color: Colors.grey[700],

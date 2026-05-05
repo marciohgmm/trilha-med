@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/services/firebase_service.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
+import 'package:flutter_quill_extensions/flutter_quill_extensions.dart';
 import 'package:http/http.dart' as http;
 
 class CriarFlashcardPage extends StatefulWidget {
@@ -51,6 +52,7 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
 
   bool carregando = true;
   bool salvando = false;
+  bool _enviandoImagem = false;
 
   bool get modoEdicao => widget.cardId != null && widget.dados != null;
 
@@ -124,14 +126,24 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
 
     try {
       final decoded = jsonDecode(conteudo);
-      if (decoded is List) {
+      final delta = decoded is List
+          ? decoded
+          : decoded is Map<String, dynamic> && decoded['ops'] is List
+              ? decoded['ops']
+              : null;
+
+      if (delta is List) {
         controller.document = quill.Document.fromJson(
           List<Map<String, dynamic>>.from(
-            decoded.map((item) => Map<String, dynamic>.from(item as Map)),
+            delta.map((item) => Map<String, dynamic>.from(item as Map)),
           ),
         );
       } else {
-        controller.document = quill.Document()..insert(0, conteudo);
+        controller.document = quill.Document.fromJson(
+          List<Map<String, dynamic>>.from(
+            jsonDecode(conteudo) as List,
+          ),
+        );
       }
     } catch (_) {
       controller.document = quill.Document()..insert(0, conteudo);
@@ -489,7 +501,9 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
                 ),
                 IconButton(
                   tooltip: 'Inserir imagem',
-                  onPressed: () => _inserirImagemNoEditor(controller, campo),
+                              onPressed: _enviandoImagem
+                                  ? null
+                                  : () => _inserirImagemNoEditor(controller, campo),
                   icon: const Icon(
                     Icons.image_outlined,
                     color: Color(0xFF1E3A8A),
@@ -505,13 +519,18 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
               border: Border.all(color: Colors.black12),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: quill.QuillEditor.basic(
+            child: quill.QuillEditor(
               controller: controller,
               focusNode: focusNode,
               scrollController: scrollController,
               config: quill.QuillEditorConfig(
                 padding: const EdgeInsets.all(12),
+                autoFocus: false,
+                expands: false,
                 placeholder: 'Digite o conteúdo de $titulo...',
+                embedBuilders: kIsWeb
+                    ? FlutterQuillEmbeds.editorWebBuilders()
+                    : FlutterQuillEmbeds.editorBuilders(),
               ),
             ),
           ),
@@ -557,14 +576,16 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
         ? nomeOriginal.split('.').last.toLowerCase()
         : 'jpg';
 
-    final validExtensions = ['jpg', 'jpeg', 'png', 'heic', 'heif'];
+    // HEIC/HEIF frequentemente não renderiza em `Image.network` no Android.
+    // Mantemos apenas formatos amplamente suportados para garantir preview no app.
+    final validExtensions = ['jpg', 'jpeg', 'png'];
 
     if (!validExtensions.contains(extensao)) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Por favor, selecione uma imagem em formato JPG, JPEG, PNG, HEIC ou HEIF',
+            'Por favor, selecione uma imagem em formato JPG, JPEG ou PNG',
           ),
           duration: Duration(seconds: 2),
         ),
@@ -589,15 +610,32 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
     // #endregion
 
     try {
-      final url = await firebaseService.uploadImagem(bytes, nomeArquivo);
+      if (mounted) {
+        setState(() {
+          _enviandoImagem = true;
+        });
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Enviando imagem...')),
+        );
+      }
 
-      if (url == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Erro ao enviar imagem')),
-          );
-        }
-        return;
+      final contentType = switch (extensao) {
+        'png' => 'image/png',
+        'jpg' || 'jpeg' => 'image/jpeg',
+        _ => 'application/octet-stream',
+      };
+      final url = await firebaseService
+          .uploadImagem(
+            bytes,
+            nomeArquivo,
+            contentType: contentType,
+          )
+          // Evita ficar preso no "carregando" sem retorno.
+          .timeout(const Duration(seconds: 35));
+      if (url == null || url.trim().isEmpty) {
+        throw Exception('Upload não retornou URL.');
       }
 
       final selection = controller.selection;
@@ -605,15 +643,35 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
           ? selection.baseOffset
           : controller.document.length;
 
+      // Coloca a imagem "centralizada" (em bloco) entre quebras de linha,
+      // para ficar visível e permitir digitar antes/depois.
       controller.replaceText(
         index,
         0,
-        quill.BlockEmbed.image(url),
+        '\n',
         TextSelection.collapsed(offset: index + 1),
+      );
+      controller.replaceText(
+        index + 1,
+        0,
+        quill.BlockEmbed.image(url),
+        TextSelection.collapsed(offset: index + 2),
+      );
+      controller.replaceText(
+        index + 2,
+        0,
+        '\n',
+        TextSelection.collapsed(offset: index + 3),
+      );
+      controller.updateSelection(
+        TextSelection.collapsed(offset: index + 3),
+        quill.ChangeSource.local,
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(
           const SnackBar(content: Text('Imagem inserida com sucesso!')),
         );
       }
@@ -627,9 +685,20 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
       );
       // #endregion
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao inserir imagem: $e')),
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Erro ao enviar/inserir imagem: $e'),
+          backgroundColor: Colors.red,
+        ),
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _enviandoImagem = false;
+        });
+      }
     }
   }
 

@@ -2,17 +2,20 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import 'questoes_page.dart';
+import 'tela_flashcards.dart';
 
 class SubtemasPage extends StatelessWidget {
   final String userId;
   final String? materia;
   final String tema;
+  final String collectionName;
 
   const SubtemasPage({
     super.key,
     required this.userId,
     this.materia,
     required this.tema,
+    this.collectionName = 'flashcards',
   });
 
   Map<String, int> _agruparSubtemas(List<QueryDocumentSnapshot> docs) {
@@ -48,7 +51,7 @@ class SubtemasPage extends StatelessWidget {
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: () {
-          var query = FirebaseFirestore.instance.collection('questoes').where('tema', isEqualTo: tema);
+          var query = FirebaseFirestore.instance.collection(collectionName).where('tema', isEqualTo: tema);
           if (materia != null) {
             query = query.where('materia', isEqualTo: materia);
           }
@@ -124,7 +127,7 @@ class SubtemasPage extends StatelessWidget {
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          subtitle: Text('$total questões neste subtema'),
+                          subtitle: Text('$total ${collectionName == 'questoes' ? 'questões' : 'flashcards'} neste subtema'),
                           trailing: const Icon(
                             Icons.arrow_forward_ios,
                             color: Color(0xFF1E3A8A),
@@ -133,12 +136,22 @@ class SubtemasPage extends StatelessWidget {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => QuestoesPage(
-                                  userId: userId,
-                                  materia: materia,
-                                  tema: tema,
-                                  subtema: subtema,
-                                ),
+                                builder: (context) {
+                                  if (collectionName == 'questoes') {
+                                    return QuestoesPage(
+                                      userId: userId,
+                                      materia: materia,
+                                      tema: tema,
+                                      subtema: subtema,
+                                    );
+                                  }
+                                  return TelaFlashcards(
+                                    userId: userId,
+                                    materia: materia ?? '',
+                                    tema: tema,
+                                    subtema: subtema,
+                                  );
+                                },
                               ),
                             );
                           },

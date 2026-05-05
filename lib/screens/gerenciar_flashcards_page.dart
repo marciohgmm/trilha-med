@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/criar_flashcard_page.dart';
@@ -17,6 +19,39 @@ class _GerenciarFlashcardsPageState extends State<GerenciarFlashcardsPage> {
   final Set<String> selecionados = {};
   bool modoSelecao = false;
   bool excluindoLote = false;
+
+  String _normalizarConteudoRichText(dynamic conteudo) {
+    final texto = conteudo?.toString() ?? '';
+    if (texto.trim().isEmpty) return '';
+
+    try {
+      final decoded = jsonDecode(texto);
+      final ops = decoded is List
+          ? decoded
+          : decoded is Map<String, dynamic> && decoded['ops'] is List
+              ? decoded['ops']
+              : null;
+
+      if (ops is List) {
+        return ops.map((item) {
+          if (item is Map<String, dynamic>) {
+            final insert = item['insert'];
+            if (insert is String) {
+              return insert;
+            }
+            if (insert is Map<String, dynamic> && insert['image'] != null) {
+              return '[Imagem]';
+            }
+          }
+          return item.toString();
+        }).join().trim();
+      }
+    } catch (_) {
+      // não é Delta JSON, cai para texto simples
+    }
+
+    return texto;
+  }
 
   void _entrarModoSelecao(String id) {
     setState(() {
@@ -136,8 +171,8 @@ class _GerenciarFlashcardsPageState extends State<GerenciarFlashcardsPage> {
     final materia = (data['materia'] ?? '').toString();
     final tema = (data['tema'] ?? '').toString();
     final subtema = (data['subtema'] ?? '').toString();
-    final pergunta = (data['pergunta'] ?? '').toString();
-    final resposta = (data['resposta'] ?? '').toString();
+    final pergunta = _normalizarConteudoRichText(data['pergunta']);
+    final resposta = _normalizarConteudoRichText(data['resposta']);
 
     final estaSelecionado = selecionados.contains(cardId);
 

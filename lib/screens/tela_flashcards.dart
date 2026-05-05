@@ -3,9 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:convert';
 import 'package:flutter/gestures.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 import 'cronograma_page.dart';
-import 'questoes_por_tema_page.dart';
+import 'questoes_page.dart';
 import '../services/study_timer_service.dart';
 import '../widgets/study_timer_overlay.dart';
 
@@ -32,12 +33,29 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
   bool mostrandoResposta = false;
   bool salvando = false;
   bool enviandoReport = false;
+  bool _mostrarExplicacao = false;
+  bool _assuntoConcluido = false;
 
   final StudyTimerService _timerService = StudyTimerService();
+
+  Future<String> _carregarNomeAluno() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userId)
+          .get();
+      final data = doc.data();
+      final nome = (data?['nome'] ?? '').toString().trim();
+      return nome.isNotEmpty ? nome : 'Aluno(a)';
+    } catch (_) {
+      return 'Aluno(a)';
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    debugPrint('TelaFlashcards init: userId=${widget.userId}, materia=${widget.materia}, tema=${widget.tema}, subtema=${widget.subtema}');
     _timerService.loadSettings().then((_) {
       _timerService.iniciarEstudo();
     });
@@ -162,6 +180,9 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
     try {
       final decoded = jsonDecode(texto);
       if (decoded is List) return decoded;
+      if (decoded is Map && decoded['ops'] is List) {
+        return decoded['ops'] as List;
+      }
       return null;
     } catch (_) {
       return null;
@@ -266,13 +287,7 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
           widgets.add(
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Image.network(
-                imageUrl,
-                height: 180,
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) =>
-                    const Text('Imagem não carregada'),
-              ),
+              child: _buildImagemUrl(imageUrl),
             ),
           );
         }
@@ -299,14 +314,69 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
     );
   }
 
+  Widget _buildImagemUrl(String url) {
+    if (url.trim().isEmpty) return const SizedBox.shrink();
+
+    // Em alguns casos pode ser salvo como gs://..., especialmente em migrações/imports.
+    if (url.startsWith('gs://')) {
+      return FutureBuilder<String>(
+        future: FirebaseStorage.instance.refFromURL(url).getDownloadURL(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return _buildImagemNetwork(snapshot.data!);
+        },
+      );
+    }
+
+    return _buildImagemNetwork(url);
+  }
+
+  Widget _buildImagemNetwork(String url) {
+    return Image.network(
+      url,
+      height: 180,
+      fit: BoxFit.contain,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        final expected = progress.expectedTotalBytes;
+        final loaded = progress.cumulativeBytesLoaded;
+        final value = expected != null && expected > 0 ? loaded / expected : null;
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Center(
+            child: CircularProgressIndicator(value: value),
+          ),
+        );
+      },
+      errorBuilder: (context, error, stackTrace) {
+        debugPrint('Falha carregando imagem: $url -> $error');
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Text(
+            'Imagem não carregada.\n$url\n$error',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.red),
+          ),
+        );
+      },
+    );
+  }
+
   void proximoCard(int total) {
     setState(() {
       if (indiceAtual < total - 1) {
         indiceAtual++;
       } else {
-        Navigator.pop(context);
+        // Ao concluir, mostramos a tela final (não popamos automaticamente).
+        _assuntoConcluido = true;
       }
       mostrandoResposta = false;
+      _mostrarExplicacao = false;
     });
   }
 
@@ -524,7 +594,15 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
       //   ),
       // );
 
-      proximoCard(total);
+      // Se for o último card, em vez de sair, mostramos a finalização do tema.
+      if (indiceAtual >= total - 1) {
+        if (!mounted) return;
+        setState(() {
+          _assuntoConcluido = true;
+        });
+      } else {
+        proximoCard(total);
+      }
     } catch (e) {
       if (!mounted) return;
 
@@ -570,6 +648,7 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
             }
 
             final docs = snapshot.data!.docs;
+            debugPrint('Encontrados ${docs.length} flashcards para materia: ${widget.materia}, tema: ${widget.tema}, subtema: ${widget.subtema}');
 
             if (docs.isEmpty) {
               return const Center(child: Text('Sem flashcards'));
@@ -588,6 +667,102 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
             final imagemPergunta = data['imagemPergunta'] ?? '';
             final imagemResposta = data['imagemResposta'] ?? '';
             final explicacao = _normalizarConteudoRichText(data['explicacao']);
+
+            // Tela final do tema/subtema (se o usuário concluiu o último card)
+            if (_assuntoConcluido) {
+              return Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: Center(
+                        child: FutureBuilder<String>(
+                          future: _carregarNomeAluno(),
+                          builder: (context, snap) {
+                            final nome = snap.data ?? 'Aluno(a)';
+                            return Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.emoji_events_outlined,
+                                  size: 64,
+                                  color: Color(0xFF1E3A8A),
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Parabéns Dr.(a) $nome!',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF1E3A8A),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                const Text(
+                                  'Você concluiu mais um tema.\nFoco, disciplina e constância é o caminho do sucesso.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 16),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        _FooterActionButton(
+                          texto: 'Resolver questões',
+                          icone: Icons.quiz,
+                          cor: const Color(0xFF1E3A8A),
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => QuestoesPage(
+                                  userId: widget.userId,
+                                  materia: widget.materia,
+                                  tema: widget.tema,
+                                  subtema: widget.subtema,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        _FooterActionButton(
+                          texto: 'Cronograma',
+                          icone: Icons.schedule,
+                          cor: Colors.blueGrey,
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => CronogramaPage(
+                                  userId: widget.userId,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        _FooterActionButton(
+                          texto: 'Home',
+                          icone: Icons.home,
+                          cor: const Color(0xFF1E3A8A),
+                          onPressed: () {
+                            Navigator.popUntil(context, (route) => route.isFirst);
+                          },
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: bottomPadding),
+                  ],
+                ),
+              );
+            }
 
             return Column(
               children: [
@@ -614,9 +789,25 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
                         children: [
                           GestureDetector(
                             onTap: () => setState(
-                                () => mostrandoResposta = !mostrandoResposta),
+                                () {
+                                  mostrandoResposta = !mostrandoResposta;
+                                  _mostrarExplicacao = false;
+                                }),
                             child: Column(
                               children: [
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    mostrandoResposta ? 'RESPOSTA' : 'PERGUNTA',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 1.1,
+                                      color: Color(0xFF1E3A8A),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
                                 _buildConteudoFormatado(
                                   valor: mostrandoResposta ? data['resposta'] : data['pergunta'],
                                   destaquePergunta: !mostrandoResposta,
@@ -624,34 +815,46 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
                                 const SizedBox(height: 16),
                                 if (!mostrandoResposta &&
                                     imagemPergunta.toString().isNotEmpty)
-                                  Image.network(
-                                    imagemPergunta,
-                                    height: 150,
-                                    errorBuilder: (context, error, stackTrace) =>
-                                        const Text('Imagem não carregada'),
-                                  ),
+                                  _buildImagemUrl(imagemPergunta.toString()),
                                 if (mostrandoResposta &&
                                     imagemResposta.toString().isNotEmpty)
-                                  Image.network(
-                                    imagemResposta,
-                                    height: 150,
-                                    errorBuilder: (context, error, stackTrace) =>
-                                        const Text('Imagem não carregada'),
-                                  ),
+                                  _buildImagemUrl(imagemResposta.toString()),
                                 if (mostrandoResposta &&
-                                    explicacao.toString().isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 12),
-                                    child: Column(
-                                      children: [
-                                        const Text('💡', textAlign: TextAlign.center),
-                                        _buildConteudoFormatado(
-                                          valor: data['explicacao'],
-                                          destaquePergunta: false,
-                                        ),
-                                      ],
+                                    explicacao.toString().isNotEmpty) ...[
+                                  const SizedBox(height: 12),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: TextButton(
+                                      onPressed: () {
+                                        setState(() {
+                                          _mostrarExplicacao =
+                                              !_mostrarExplicacao;
+                                        });
+                                      },
+                                      child: Text(
+                                        _mostrarExplicacao
+                                            ? 'OCULTAR EXPLICAÇÃO'
+                                            : 'MOSTRAR EXPLICAÇÃO',
+                                      ),
                                     ),
                                   ),
+                                  if (_mostrarExplicacao)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Column(
+                                        children: [
+                                          const Text(
+                                            '💡',
+                                            textAlign: TextAlign.center,
+                                          ),
+                                          _buildConteudoFormatado(
+                                            valor: data['explicacao'],
+                                            destaquePergunta: false,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
                               ],
                             ),
                           ),
@@ -680,65 +883,6 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
                                 'Reportar erro no card $indiceCard/${docs.length}',
                               ),
                             ),
-                            if (indiceAtual == docs.length - 1) ...[
-                              const SizedBox(height: 16),
-                              const Divider(),
-                              const SizedBox(height: 16),
-                              const Text(
-                                'Último card alcançado',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Wrap(
-                                spacing: 12,
-                                runSpacing: 12,
-                                children: [
-                                  _FooterActionButton(
-                                    texto: 'Ir para questões deste tema',
-                                    icone: Icons.quiz,
-                                    cor: const Color(0xFF1E3A8A),
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => QuestoesPorTemaPage(
-                                            userId: widget.userId,
-                                            materia: widget.materia,
-                                            tema: widget.tema,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  _FooterActionButton(
-                                    texto: 'Voltar para cronograma',
-                                    icone: Icons.schedule,
-                                    cor: Colors.blueGrey,
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => CronogramaPage(
-                                            userId: widget.userId,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  _FooterActionButton(
-                                    texto: 'Voltar para tela inicial',
-                                    icone: Icons.home,
-                                    cor: const Color(0xFF1E3A8A),
-                                    onPressed: () {
-                                      Navigator.popUntil(context, (route) => route.isFirst);
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ],
                           ],
                         ],
                       ),
@@ -822,7 +966,10 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
                       ],
                     ),
                     child: ElevatedButton(
-                      onPressed: () => setState(() => mostrandoResposta = true),
+                      onPressed: () => setState(() {
+                        mostrandoResposta = true;
+                        _mostrarExplicacao = false;
+                      }),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF1E3A8A),
                         foregroundColor: Colors.white,

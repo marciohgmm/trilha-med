@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/criar_flashcard_page.dart';
 import 'package:flutter_application_1/screens/admin_materias_page.dart';
 import 'package:flutter_application_1/screens/admin_notificacoes_page.dart';
+import 'package:flutter_application_1/screens/admin_questoes_materias_page.dart';
 import 'package:flutter_application_1/services/firebase_service.dart';
 
 class AdminPage extends StatelessWidget {
@@ -171,6 +172,19 @@ class AdminPage extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (context) => const AdminMateriasPage(),
+                ),
+              );
+            },
+          ),
+          _botaoAdmin(
+            icon: Icons.quiz_outlined,
+            titulo: 'Gerenciar questões',
+            subtitulo: 'Criar, editar e excluir questões',
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const AdminQuestoesMateriasPage(),
                 ),
               );
             },

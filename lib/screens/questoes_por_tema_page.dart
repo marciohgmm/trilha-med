@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'temas_page.dart';
 import '../services/study_timer_service.dart';
 import '../widgets/study_timer_overlay.dart';
+import 'estatisticas_questoes_page.dart';
 
 class QuestoesPorTemaPage extends StatefulWidget {
   final String userId;
@@ -121,6 +122,20 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
         centerTitle: true,
+        actions: [
+          IconButton(
+            tooltip: 'Estatísticas',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => EstatisticasQuestoesPage(userId: widget.userId),
+                ),
+              );
+            },
+            icon: const Icon(Icons.bar_chart),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Stack(
@@ -173,6 +188,17 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
                                 .collection('questoes')
                                 .snapshots(),
                             builder: (context, snapshot) {
+                              if (snapshot.hasError) {
+                                return Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(24),
+                                    child: Text(
+                                      'Erro ao carregar questões: ${snapshot.error}',
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                );
+                              }
                               if (!snapshot.hasData) {
                                 return const Center(child: CircularProgressIndicator());
                               }
@@ -241,6 +267,7 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
                                             builder: (_) => TemasPage(
                                               userId: widget.userId,
                                               materia: materia,
+                                              collectionName: 'questoes',
                                             ),
                                           ),
                                         );

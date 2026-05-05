@@ -456,6 +456,7 @@ class FirebaseService {
   Future<String?> uploadImagem(
     Uint8List imagemBytes,
     String nomeArquivo,
+    {String? contentType}
   ) async {
     try {
       // #region agent log
@@ -466,6 +467,7 @@ class FirebaseService {
         data: {
           'nomeArquivo': nomeArquivo,
           'bytesLength': imagemBytes.length,
+          'contentType': contentType,
         },
       );
       // #endregion
@@ -474,8 +476,41 @@ class FirebaseService {
           .child('flashcards')
           .child(nomeArquivo);
 
-      await ref.putData(imagemBytes);
-      final url = await ref.getDownloadURL();
+      final metadata = SettableMetadata(
+        contentType: contentType,
+        cacheControl: 'public, max-age=3600',
+      );
+
+      final uploadTask = ref.putData(imagemBytes, metadata);
+      TaskSnapshot task;
+      try {
+        task = await uploadTask.whenComplete(() {}).timeout(
+          const Duration(seconds: 35),
+          onTimeout: () async {
+            try {
+              await uploadTask.cancel();
+            } catch (_) {}
+            throw FirebaseException(
+              plugin: 'firebase_storage',
+              code: 'timeout',
+              message:
+                  'Timeout ao enviar imagem. Verifique sua conexão e as regras do Firebase Storage.',
+            );
+          },
+        );
+      } on FirebaseException {
+        rethrow;
+      }
+
+      if (task.state != TaskState.success) {
+        throw FirebaseException(
+          plugin: 'firebase_storage',
+          code: 'upload-failed',
+          message: 'Falha ao enviar imagem (state=${task.state}).',
+        );
+      }
+      // IMPORTANT: use o ref do snapshot do upload (evita object-not-found em alguns devices).
+      final url = await task.ref.getDownloadURL();
       // #region agent log
       await _debugLog(
         hypothesisId: 'H1',
@@ -485,16 +520,24 @@ class FirebaseService {
       );
       // #endregion
       return url;
-    } catch (e) {
+    } on FirebaseException catch (e) {
       // #region agent log
+      await _debugLog(
+        hypothesisId: 'H1',
+        location: 'firebase_service.dart:402',
+        message: 'uploadImagem:error',
+        data: {'nomeArquivo': nomeArquivo, 'error': e.toString(), 'code': e.code},
+      );
+      // #endregion
+      rethrow;
+    } catch (e) {
       await _debugLog(
         hypothesisId: 'H1',
         location: 'firebase_service.dart:402',
         message: 'uploadImagem:error',
         data: {'nomeArquivo': nomeArquivo, 'error': e.toString()},
       );
-      // #endregion
-      return null;
+      rethrow;
     }
   }
 

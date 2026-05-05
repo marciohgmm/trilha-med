@@ -1,6 +1,43 @@
+import 'dart:convert';
+
 import 'package:flutter_application_1/screens/criar_flashcard_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/screens/criar_questao_page.dart';
+import 'package:flutter_application_1/services/questao_service.dart';
+
+String _normalizarConteudoRichText(dynamic conteudo) {
+  final texto = conteudo?.toString() ?? '';
+  if (texto.trim().isEmpty) return '';
+
+  try {
+    final decoded = jsonDecode(texto);
+    final ops = decoded is List
+        ? decoded
+        : decoded is Map<String, dynamic> && decoded['ops'] is List
+            ? decoded['ops']
+            : null;
+
+    if (ops is List) {
+      return ops.map((item) {
+        if (item is Map<String, dynamic>) {
+          final insert = item['insert'];
+          if (insert is String) {
+            return insert;
+          }
+          if (insert is Map<String, dynamic> && insert['image'] != null) {
+            return '[Imagem]';
+          }
+        }
+        return item.toString();
+      }).join().trim();
+    }
+  } catch (_) {
+    // não é Delta JSON, cai para texto simples
+  }
+
+  return texto;
+}
 
 class AdminNotificacoesPage extends StatelessWidget {
   const AdminNotificacoesPage({super.key});
@@ -22,6 +59,8 @@ class AdminNotificacoesPage extends StatelessWidget {
     switch (tipo) {
       case 'erro_card':
         return 'Erro em card';
+      case 'erro_questao':
+        return 'Erro em questão';
       case 'contato_admin':
         return 'Contato com admin';
       default:
@@ -97,7 +136,7 @@ class AdminNotificacoesPage extends StatelessWidget {
               final subtema = (data['subtema'] ?? '').toString();
               final indiceCard = (data['indiceCard'] ?? '').toString();
               final totalCards = (data['totalCardsSubtema'] ?? '').toString();
-              final pergunta = (data['pergunta'] ?? '').toString();
+              final pergunta = _normalizarConteudoRichText(data['pergunta']);
 
               return Card(
                 elevation: 3,
@@ -245,14 +284,17 @@ class AdminNotificacaoDetalhePage extends StatelessWidget {
     final tema = (data['tema'] ?? '').toString();
     final subtema = (data['subtema'] ?? '').toString();
     final userId = (data['userId'] ?? '').toString();
-    final pergunta = (data['pergunta'] ?? '').toString();
-    final resposta = (data['resposta'] ?? '').toString();
-    final explicacao = (data['explicacao'] ?? '').toString();
+    final pergunta = _normalizarConteudoRichText(data['pergunta']);
+    final resposta = _normalizarConteudoRichText(data['resposta']);
+    final explicacao = _normalizarConteudoRichText(data['explicacao']);
     final indiceCard = (data['indiceCard'] ?? '').toString();
     final totalCards = (data['totalCardsSubtema'] ?? '').toString();
     final flashcardDocId = (data['flashcardDocId'] ?? '').toString();
+    final questaoId = (data['questaoId'] ?? '').toString();
+    final enunciadoQuestao = (data['enunciado'] ?? '').toString();
 
     final podeEditarCard = tipo == 'erro_card' && flashcardDocId.isNotEmpty;
+    final podeEditarQuestao = tipo == 'erro_questao' && questaoId.isNotEmpty;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4F8),
@@ -278,9 +320,13 @@ class AdminNotificacaoDetalhePage extends StatelessWidget {
           ),
           if (podeEditarCard)
             _SecaoDetalhe(titulo: 'ID do card', conteudo: flashcardDocId),
+          if (podeEditarQuestao)
+            _SecaoDetalhe(titulo: 'ID da questão', conteudo: questaoId),
           _SecaoDetalhe(titulo: 'Pergunta', conteudo: pergunta),
           _SecaoDetalhe(titulo: 'Resposta', conteudo: resposta),
           _SecaoDetalhe(titulo: 'Explicação', conteudo: explicacao),
+          if (podeEditarQuestao)
+            _SecaoDetalhe(titulo: 'Enunciado (questão)', conteudo: enunciadoQuestao),
           _SecaoDetalhe(titulo: 'Mensagem do aluno', conteudo: mensagem),
           const SizedBox(height: 24),
           if (podeEditarCard) ...[
@@ -313,6 +359,47 @@ class AdminNotificacaoDetalhePage extends StatelessWidget {
               },
               icon: const Icon(Icons.edit),
               label: const Text('Editar este card'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E3A8A),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (podeEditarQuestao) ...[
+            ElevatedButton.icon(
+              onPressed: () async {
+                final questao = await QuestaoService().getQuestaoPorId(questaoId);
+                if (!context.mounted) return;
+
+                if (questao == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Questão não encontrada.'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+
+                final result = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CriarQuestaoPage(questao: questao),
+                  ),
+                );
+
+                if (result == true && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Questão atualizada com sucesso!'),
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.edit),
+              label: const Text('Editar esta questão'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF1E3A8A),
                 foregroundColor: Colors.white,

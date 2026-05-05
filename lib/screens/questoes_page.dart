@@ -1,5 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+
+import '../services/questao_service.dart';
+import '../widgets/questao_card.dart';
 
 class QuestoesPage extends StatefulWidget {
   final String userId;
@@ -20,13 +22,24 @@ class QuestoesPage extends StatefulWidget {
 }
 
 class _QuestoesPageState extends State<QuestoesPage> {
+  final QuestaoService _service = QuestaoService();
+  bool _modoProxima = false;
+  final PageController _pageController = PageController();
+
+  @override
+  void initState() {
+    super.initState();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4F8),
       appBar: AppBar(
         title: Text(
-          widget.materia != null ? '${widget.subtema} - ${widget.tema}' : '${widget.subtema} - ${widget.tema}',
+          widget.materia != null
+              ? '${widget.subtema} - ${widget.tema}'
+              : '${widget.subtema} - ${widget.tema}',
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
@@ -35,128 +48,114 @@ class _QuestoesPageState extends State<QuestoesPage> {
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
         centerTitle: true,
+        actions: [
+          IconButton(
+            tooltip: _modoProxima ? 'Modo rolagem' : 'Modo próxima',
+            onPressed: () {
+              setState(() {
+                _modoProxima = !_modoProxima;
+              });
+              if (_modoProxima) {
+                _pageController.jumpToPage(0);
+              }
+            },
+            icon: Icon(_modoProxima ? Icons.view_agenda : Icons.swipe),
+          ),
+        ],
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: () {
-          var query = FirebaseFirestore.instance.collection('questoes').where('tema', isEqualTo: widget.tema).where('subtema', isEqualTo: widget.subtema);
-          if (widget.materia != null) {
-            query = query.where('materia', isEqualTo: widget.materia);
-          }
-          return query.snapshots();
-        }(),
+      body: StreamBuilder(
+        stream: _service.getQuestoesPorTema(
+          materia: widget.materia,
+          tema: widget.tema,
+          subtema: widget.subtema,
+          somenteAtivas: true,
+        ),
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  'Erro ao carregar questões: ${snapshot.error}',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
+          }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final docs = snapshot.data!.docs;
+          final questoes = snapshot.data!;
 
-          if (docs.isEmpty) {
-            return const Center(
+          if (questoes.isEmpty) {
+            return Center(
               child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'Nenhuma questão encontrada para este subtema.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 16, color: Colors.grey),
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Nenhuma questão encontrada para este subtema.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.arrow_back),
+                      label: const Text('Voltar'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1E3A8A),
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: docs.length,
+          if (!_modoProxima) {
+            return ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              itemCount: questoes.length,
+              itemBuilder: (context, index) {
+                return QuestaoCard(
+                  questao: questoes[index],
+                  userId: widget.userId,
+                );
+              },
+            );
+          }
+
+          return PageView.builder(
+            controller: _pageController,
+            itemCount: questoes.length,
             itemBuilder: (context, index) {
-              final doc = docs[index];
-              final data = doc.data() as Map<String, dynamic>;
-              final enunciado = data['enunciado'] ?? '';
-              final alternativas = List<Map<String, dynamic>>.from(data['alternativas'] ?? []);
-              final comentario = data['comentario'] ?? '';
-
-              return Card(
-                margin: const EdgeInsets.only(bottom: 16),
-                elevation: 4,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        enunciado,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF1E3A8A),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      ...alternativas.map((alt) {
-                        final letra = alt['letra'] ?? '';
-                        final texto = alt['texto'] ?? '';
-                        final correta = alt['correta'] ?? false;
-
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: correta ? Colors.green.shade50 : Colors.white,
-                            border: Border.all(
-                              color: correta ? Colors.green : Colors.grey.shade300,
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            children: [
-                              Text(
-                                '$letra)',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: correta ? Colors.green : Colors.black,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  texto,
-                                  style: TextStyle(
-                                    color: correta ? Colors.green : Colors.black,
-                                  ),
-                                ),
-                              ),
-                              if (correta)
-                                const Icon(
-                                  Icons.check_circle,
-                                  color: Colors.green,
-                                ),
-                            ],
-                          ),
-                        );
-                      }),
-                      if (comentario.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        const Text(
-                          'Comentário:',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1E3A8A),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          comentario,
-                          style: const TextStyle(
-                            fontStyle: FontStyle.italic,
-                            color: Colors.black87,
-                          ),
-                        ),
-                      ],
-                    ],
+              return ListView(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                children: [
+                  QuestaoCard(
+                    questao: questoes[index],
+                    userId: widget.userId,
+                    showNextButton: index < questoes.length - 1,
+                    onNext: () {
+                      _pageController.nextPage(
+                        duration: const Duration(milliseconds: 250),
+                        curve: Curves.easeOut,
+                      );
+                    },
                   ),
-                ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      'Questão ${index + 1} de ${questoes.length}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.black54),
+                    ),
+                  ),
+                ],
               );
             },
           );

@@ -4,7 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import '../../services/biometria/biometria_service.dart';
+import 'package:flutter_application_1/services/auth/credenciais_salvas_service.dart';
+import 'package:flutter_application_1/services/biometria/biometria_service.dart';
 import 'main_navigation_page.dart';
 import 'register_screen.dart';
 
@@ -21,8 +22,13 @@ class _LoginPageState extends State<LoginPage> {
   final emailRecuperacaoController = TextEditingController();
 
   final BiometriaService _biometriaService = BiometriaService();
-  bool usuarioJaLogado = true; // simulação inicial
+  final CredenciaisSalvasService _credenciaisService =
+      CredenciaisSalvasService();
+
+  bool usuarioJaLogado = false;
   bool _dispositivoSuportaBiometria = false;
+  bool _salvarSenhaHabilitado = false;
+  bool _temCredenciaisSalvas = false;
 
   bool exibirRecuperacao = false;
   bool carregandoLogin = false;
@@ -32,6 +38,28 @@ class _LoginPageState extends State<LoginPage> {
   void initState() {
     super.initState();
     _verificarBiometria();
+    _carregarEstadoInicial();
+  }
+
+  Future<void> _carregarEstadoInicial() async {
+    final salvarSenha = await _credenciaisService.getSalvarSenhaHabilitado();
+    final creds = await _credenciaisService.lerCredenciais();
+    final currentUser = FirebaseAuth.instance.currentUser;
+
+    if (!mounted) return;
+
+    setState(() {
+      _salvarSenhaHabilitado = salvarSenha;
+      _temCredenciaisSalvas =
+          (creds.email?.isNotEmpty ?? false) && (creds.senha?.isNotEmpty ?? false);
+      usuarioJaLogado = currentUser != null;
+      if (salvarSenha && (creds.email?.isNotEmpty ?? false)) {
+        emailController.text = creds.email!;
+      }
+      if (salvarSenha && (creds.senha?.isNotEmpty ?? false)) {
+        senhaController.text = creds.senha!;
+      }
+    });
   }
 
   Future<void> _verificarBiometria() async {
@@ -48,10 +76,45 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted) return;
 
     if (autenticado) {
-      Navigator.pushReplacementNamed(context, '/home');
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        await currentUser.reload();
+        final user = FirebaseAuth.instance.currentUser;
+        if (!mounted) return;
+        if (user != null) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => MainNavigationPage(userId: user.uid),
+            ),
+          );
+          return;
+        }
+      }
+
+      if (_salvarSenhaHabilitado) {
+        final creds = await _credenciaisService.lerCredenciais();
+        final email = (creds.email ?? '').trim();
+        final senha = (creds.senha ?? '').trim();
+        if (email.isNotEmpty && senha.isNotEmpty) {
+          await _loginComCredenciais(email: email, senha: senha);
+          return;
+        }
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Biometria ok, mas não há sessão/credenciais salvas para entrar.",
+          ),
+          backgroundColor: Colors.orange,
+        ),
+      );
       return;
     }
 
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text("Autenticação biométrica falhou. Tente novamente."),
@@ -60,21 +123,11 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  Future<void> login() async {
-    final email = emailController.text.trim();
-    final senha = senhaController.text.trim();
-
-    if (email.isEmpty || senha.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Preencha email e senha"),
-        ),
-      );
-      return;
-    }
-
+  Future<void> _loginComCredenciais({
+    required String email,
+    required String senha,
+  }) async {
     FocusScope.of(context).unfocus();
-
     setState(() {
       carregandoLogin = true;
     });
@@ -87,14 +140,12 @@ class _LoginPageState extends State<LoginPage> {
       );
 
       User? user = userCredential.user;
-
       if (user == null) {
         throw Exception('Usuário não encontrado');
       }
 
       await user.reload();
       user = FirebaseAuth.instance.currentUser;
-
       if (user == null) {
         throw Exception('Não foi possível atualizar os dados do usuário');
       }
@@ -117,14 +168,21 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      final userId = user.uid;
+      if (_salvarSenhaHabilitado) {
+        await _credenciaisService.salvarCredenciais(email: email, senha: senha);
+        _temCredenciaisSalvas = true;
+      } else {
+        await _credenciaisService.apagarCredenciais();
+        _temCredenciaisSalvas = false;
+      }
 
       if (!mounted) return;
 
+      final uid = user.uid;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => MainNavigationPage(userId: userId),
+          builder: (context) => MainNavigationPage(userId: uid),
         ),
       );
     } on FirebaseAuthException catch (e) {
@@ -160,10 +218,28 @@ class _LoginPageState extends State<LoginPage> {
         ),
       );
     } finally {
-      setState(() {
-        carregandoLogin = false;
-      });
+      if (mounted) {
+        setState(() {
+          carregandoLogin = false;
+        });
+      }
     }
+  }
+
+  Future<void> login() async {
+    final email = emailController.text.trim();
+    final senha = senhaController.text.trim();
+
+    if (email.isEmpty || senha.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Preencha email e senha"),
+        ),
+      );
+      return;
+    }
+
+    await _loginComCredenciais(email: email, senha: senha);
   }
 
   Future<void> enviarCodigo() async {
@@ -403,6 +479,27 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                               ),
                             ),
+                            const SizedBox(height: 10),
+                            SwitchListTile.adaptive(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text("Salvar senha neste dispositivo"),
+                              value: _salvarSenhaHabilitado,
+                              onChanged: (v) async {
+                                setState(() {
+                                  _salvarSenhaHabilitado = v;
+                                });
+                                await _credenciaisService
+                                    .setSalvarSenhaHabilitado(v);
+                                final creds =
+                                    await _credenciaisService.lerCredenciais();
+                                if (!mounted) return;
+                                setState(() {
+                                  _temCredenciaisSalvas =
+                                      (creds.email?.isNotEmpty ?? false) &&
+                                          (creds.senha?.isNotEmpty ?? false);
+                                });
+                              },
+                            ),
                             const SizedBox(height: 24),
                             SizedBox(
                               width: double.infinity,
@@ -432,7 +529,9 @@ class _LoginPageState extends State<LoginPage> {
                                       ),
                               ),
                             ),
-                            if (usuarioJaLogado && _dispositivoSuportaBiometria && !kIsWeb)
+                            if ((_dispositivoSuportaBiometria &&
+                                !kIsWeb &&
+                                (usuarioJaLogado || _temCredenciaisSalvas)))
                               Column(
                                 children: [
                                   const SizedBox(height: 12),
