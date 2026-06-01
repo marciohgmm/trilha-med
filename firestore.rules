@@ -1,0 +1,707 @@
+rules_version = '2';
+
+// App Check: compatível com enforcement no Firebase Console.
+// As rules abaixo usam request.auth; com App Check Enforced, clientes sem
+// token válido são rejeitados na camada Firebase antes da avaliação das rules.
+// Login, premium, OSCE e Live Events continuam regidos por auth + estas rules.
+
+// Revalida Cards — Firestore Security Rules
+// Admin: coleção `admins/{uid}` + criador marciohgmm@gmail.com (isFounder)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isFounder() {
+      return isSignedIn()
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() == 'marciohgmm@gmail.com';
+    }
+
+    function isListedAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return isFounder() || isListedAdmin();
+    }
+
+    // Admin listado em `users.isAdmin` (além de founder / coleção admins).
+    function isAppAdmin() {
+      return isAdmin() || (
+        isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
+      );
+    }
+
+    // Alias — casos OSCE e fase prática usam o mesmo critério de editor.
+    function isOsceCaseEditor() {
+      return isAppAdmin();
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // P0-A — campos de privilégio: somente isAppAdmin() pode alterar.
+    function userPrivilegedFieldKeys() {
+      return ['isAdmin', 'rbacRoles', 'roles', 'permissions'];
+    }
+
+    function userPrivilegedFieldsUnchanged() {
+      return request.resource.data.get('isAdmin', false)
+          == resource.data.get('isAdmin', false)
+        && request.resource.data.get('rbacRoles', resource.data.get('rbacRoles', []))
+          == resource.data.get('rbacRoles', resource.data.get('rbacRoles', []))
+        && request.resource.data.get('roles', resource.data.get('roles', []))
+          == resource.data.get('roles', resource.data.get('roles', []))
+        && request.resource.data.get('permissions', resource.data.get('permissions', []))
+          == resource.data.get('permissions', resource.data.get('permissions', []));
+    }
+
+    function ownerSafeUserCreate() {
+      return request.resource.data.get('isAdmin', false) == false
+        && !request.resource.data.keys().hasAny(userPrivilegedFieldKeys());
+    }
+
+    function ownerAllowedUserRootUpdateKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'nome',
+        'telefone',
+        'cidade',
+        'email',
+        'atualizadoEm',
+        'updatedAt',
+        'lastActiveAt',
+        'signupTrackedAt',
+        'createdAt',
+        'notificationPrefs',
+        'ultimaMensagemVisualizada',
+        'ultimoAcesso',
+        'ultimaMateria',
+        'ultimoSubtema',
+        'totalRespondidas',
+        'totalAcertos',
+        'totalErros',
+        'xp',
+        'badges',
+        '_liveEventRewardEventId',
+        'oscePerformance',
+        'fcmTokens'
+      ]);
+    }
+
+    function isOwnerSafeProfileUpdate() {
+      return isOwner(userId)
+        && userPrivilegedFieldsUnchanged()
+        && !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(userPrivilegedFieldKeys())
+        && ownerAllowedUserRootUpdateKeys();
+    }
+
+    // Atualização só do mapa oscePerformance (avaliador salva nota do médico).
+    function isOscePerformanceOnlyUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['oscePerformance']);
+    }
+
+    /// Coordenador de um evento específico (host ou admin da plataforma).
+    function isLiveEventCoordinatorForEvent(eventId) {
+      return isAppAdmin()
+        || (
+          isSignedIn()
+          && get(/databases/$(database)/documents/live_events/$(eventId))
+              .data.get('hostId', '') == request.auth.uid
+        );
+    }
+
+    /// Aplica XP em users/{targetUserId} somente após payout criado pelo coordenador (D2).
+    function isLiveEventRewardGrantToUser(targetUserId) {
+      let eventId = request.resource.data.get('_liveEventRewardEventId', '');
+      let payoutPath = /databases/$(database)/documents/live_events/$(eventId)
+        /reward_payouts/$(targetUserId);
+      let allowedKeys = ['xp', 'badges', 'updatedAt', '_liveEventRewardEventId'];
+      return eventId != ''
+        && isLiveEventCoordinatorForEvent(eventId)
+        && exists(payoutPath)
+        && get(payoutPath).data.get('grantedBy', '') == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowedKeys);
+    }
+
+    function isEvaluationEvaluator() {
+      return isSignedIn()
+        && resource.data.evaluatorId == request.auth.uid;
+    }
+
+    function isEvaluationEvaluatorOnCreate() {
+      return isSignedIn()
+        && request.resource.data.evaluatorId == request.auth.uid;
+    }
+
+    // -------------------------------------------------------------------------
+    // P0-3 — proteção contra download em massa (conteúdo flashcards / questões)
+    // -------------------------------------------------------------------------
+
+    function maxStudentListLimit() {
+      return 200;
+    }
+
+    function queryLimitWithinMax() {
+      return request.query.limit != null
+        && request.query.limit > 0
+        && request.query.limit <= maxStudentListLimit();
+    }
+
+    function queryHasFieldFilter(field) {
+      return request.query.filters.size() >= 1
+        && (
+          (request.query.filters.size() >= 1
+            && request.query.filters[0].fieldPath == field)
+          || (request.query.filters.size() >= 2
+            && request.query.filters[1].fieldPath == field)
+          || (request.query.filters.size() >= 3
+            && request.query.filters[2].fieldPath == field)
+          || (request.query.filters.size() >= 4
+            && request.query.filters[3].fieldPath == field)
+        );
+    }
+
+    function isFlashcardsStudyList() {
+      return queryHasFieldFilter('materia') && queryHasFieldFilter('subtema');
+    }
+
+    function isFlashcardsScopedStudentList() {
+      return isFlashcardsStudyList()
+        || (queryLimitWithinMax() && queryHasFieldFilter('searchTerms'))
+        || (queryLimitWithinMax() && queryHasFieldFilter('__name__'))
+        || (queryHasFieldFilter('materia')
+            && (queryLimitWithinMax() || queryHasFieldFilter('subtema')));
+    }
+
+    function isQuestoesScopedStudentList() {
+      return queryHasFieldFilter('materia')
+        || queryHasFieldFilter('temaSlug')
+        || queryHasFieldFilter('temaId')
+        || queryHasFieldFilter('tema')
+        || (queryLimitWithinMax() && queryHasFieldFilter('__name__'));
+    }
+
+    // -------------------------------------------------------------------------
+    // Administradores
+    // -------------------------------------------------------------------------
+    match /admins/{adminId} {
+      allow read: if isSignedIn() && (request.auth.uid == adminId || isAppAdmin());
+      allow create, update, delete: if isAppAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Usuários (S1 — privacidade)
+    // -------------------------------------------------------------------------
+    match /users/{userId} {
+      // Privado: dono ou administrador da plataforma.
+      allow read: if isOwner(userId) || isAppAdmin();
+      allow create: if isOwner(userId)
+        && (isAppAdmin() || ownerSafeUserCreate());
+      allow update: if isAppAdmin()
+        || (isSignedIn() && isOscePerformanceOnlyUpdate())
+        || isLiveEventRewardGrantToUser(userId)
+        || isOwnerSafeProfileUpdate();
+      allow delete: if isAppAdmin();
+
+      // Público: displayName / photoUrl para exibição entre usuários (futuro/ranking).
+      match /public_profile/{profileId} {
+        allow read: if isSignedIn();
+        allow create, update: if isOwner(userId);
+        allow delete: if isOwner(userId) || isAppAdmin();
+      }
+
+      // Aceites legais (LGPD) — append-only pelo titular.
+      match /legal_acceptances/{acceptanceId} {
+        allow read: if isOwner(userId) || isAppAdmin();
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasOnly([
+            'acceptedAt',
+            'policyVersion',
+            'termsVersion',
+            'ipHash',
+            'platform',
+            'appVersion'
+          ])
+          && request.resource.data.policyVersion is string
+          && request.resource.data.termsVersion is string
+          && request.resource.data.platform is string
+          && request.resource.data.appVersion is string
+          && request.resource.data.acceptedAt == request.time;
+        allow update, delete: if false;
+      }
+
+      // progresso, questões, cronograma, notificações plataforma, etc.
+      match /{subcollection}/{docId} {
+        allow read: if isOwner(userId) || isAppAdmin();
+        allow write: if isOwner(userId) || isAppAdmin();
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Fase Prática — modelos detalhados (OSCE / simulações)
+    // -------------------------------------------------------------------------
+    match /practical_phase_models/{modelId} {
+      allow read: if isSignedIn()
+        && (
+          isAppAdmin()
+          || (resource.data.isPublished == true && resource.data.isActive == true)
+        );
+      allow create, update, delete: if isAppAdmin();
+    }
+
+    // Módulos/cards da landing da Fase Prática
+    match /practical_phase_modules/{moduleId} {
+      allow read: if isSignedIn()
+        && (
+          isAppAdmin()
+          || (resource.data.isPublished == true && resource.data.isActive == true)
+        );
+      allow create, update, delete: if isAppAdmin();
+    }
+
+    match /flashcards_materia_stats/{statId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAppAdmin();
+    }
+
+    match /flashcards_subtema_catalog/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAppAdmin();
+    }
+
+    match /questoes_materia_stats/{statId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAppAdmin();
+    }
+
+    match /questoes_subtema_catalog/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAppAdmin();
+    }
+
+    match /flashcards/{docId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn()
+        && (isAppAdmin() || isFlashcardsScopedStudentList());
+      allow write: if isAdmin();
+    }
+
+    match /questoes/{docId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn()
+        && (isAppAdmin() || isQuestoesScopedStudentList());
+      allow write: if isAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // OSCE multiplayer — salas e casos clínicos (Release R-B: S2, S3)
+    // -------------------------------------------------------------------------
+
+    /// Incremento monotônico de `lastRoomNumber` em `osce_meta/counters` (criação de sala).
+    function isOsceMetaCounterCreate() {
+      return isSignedIn()
+        && request.resource.data.keys().hasOnly(['lastRoomNumber'])
+        && request.resource.data.lastRoomNumber is int
+        && request.resource.data.lastRoomNumber >= 1;
+    }
+
+    function isOsceMetaCounterUpdate() {
+      return isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['lastRoomNumber'])
+        && request.resource.data.lastRoomNumber is int
+        && request.resource.data.lastRoomNumber
+            == resource.data.get('lastRoomNumber', 0) + 1;
+    }
+
+    match /osce_meta/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isAppAdmin() || isOsceMetaCounterCreate();
+      allow update: if isAppAdmin() || isOsceMetaCounterUpdate();
+      allow delete: if isAppAdmin();
+    }
+
+    match /osce_cases/{caseId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isOsceCaseEditor();
+    }
+
+    match /osce_rooms/{roomId} {
+      function isOsceRoomHost() {
+        return isSignedIn()
+          && resource.data.get('hostId', '') == request.auth.uid;
+      }
+
+      function isOsceRoomEvaluator() {
+        return isSignedIn()
+          && resource.data.get('evaluatorUserId', '') == request.auth.uid;
+      }
+
+      function isOsceRoomEvaluated() {
+        return isSignedIn()
+          && resource.data.get('evaluatedUserId', '') == request.auth.uid;
+      }
+
+      function isOsceRoomParticipant() {
+        return isSignedIn()
+          && exists(/databases/$(database)/documents/osce_rooms/$(roomId)/participants/$(request.auth.uid));
+      }
+
+      function osceRoomProtectedFieldsUnchanged() {
+        return request.resource.data.get('hostId', '')
+            == resource.data.get('hostId', '')
+          && request.resource.data.get('roomNumber', 0)
+            == resource.data.get('roomNumber', 0)
+          && request.resource.data.get('createdAt', null)
+            == resource.data.get('createdAt', null);
+      }
+
+      function isOsceJoinCounterUpdate() {
+        return isSignedIn()
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['participantCount', 'updatedAt'])
+          && request.resource.data.participantCount
+              == resource.data.get('participantCount', 0) + 1;
+      }
+
+      function isOsceParticipantCountDecrement() {
+        return isOsceRoomParticipant()
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['participantCount', 'updatedAt'])
+          && request.resource.data.participantCount
+              == resource.data.get('participantCount', 0) - 1;
+      }
+
+      function isOsceRoomCloseWhenEmpty() {
+        return isSignedIn()
+          && request.resource.data.get('status', '') == 'ended'
+          && request.resource.data.get('participantCount', 0) == 0;
+      }
+
+      function isOsceRoleSelfClaim() {
+        return isOsceRoomParticipant()
+          && (
+            request.resource.data.get('evaluatorUserId', '') == request.auth.uid
+            || request.resource.data.get('evaluatedUserId', '') == request.auth.uid
+          );
+      }
+
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.hostId == request.auth.uid;
+      allow delete: if isAppAdmin();
+      allow update: if isAppAdmin()
+        || (
+          isSignedIn()
+          && osceRoomProtectedFieldsUnchanged()
+          && (
+            isOsceRoomHost()
+            || isOsceRoomEvaluator()
+            || isOsceRoomEvaluated()
+            || isOsceJoinCounterUpdate()
+            || isOsceParticipantCountDecrement()
+            || isOsceRoomCloseWhenEmpty()
+            || isOsceRoleSelfClaim()
+          )
+        );
+
+      match /participants/{participantId} {
+        function osceRoomData() {
+          return get(/databases/$(database)/documents/osce_rooms/$(roomId)).data;
+        }
+
+        function isOsceRoomEvaluatorForParticipants() {
+          return isSignedIn()
+            && osceRoomData().get('evaluatorUserId', '') == request.auth.uid;
+        }
+
+        function isOsceRoomHostForParticipants() {
+          return isSignedIn()
+            && osceRoomData().get('hostId', '') == request.auth.uid;
+        }
+
+        function isOsceParticipantRoleOnlyUpdate() {
+          return request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['role']);
+        }
+
+        /// Novo avaliador rebaixa o participante do avaliador anterior (assumeEvaluator).
+        function isOsceEvaluatorHandoff() {
+          return isOsceParticipantRoleOnlyUpdate()
+            && participantId != request.auth.uid
+            && osceRoomData().get('evaluatorUserId', '') == participantId;
+        }
+
+        /// Novo médico rebaixa o participante do médico anterior (assumeEvaluated).
+        function isOsceEvaluatedHandoff() {
+          return isOsceParticipantRoleOnlyUpdate()
+            && participantId != request.auth.uid
+            && osceRoomData().get('evaluatedUserId', '') == participantId;
+        }
+
+        allow read: if isSignedIn();
+        allow create: if isOwner(participantId);
+        allow update: if isOwner(participantId)
+          || isAppAdmin()
+          || (
+            isOsceParticipantRoleOnlyUpdate()
+            && (
+              isOsceRoomEvaluatorForParticipants()
+              || isOsceRoomHostForParticipants()
+              || isOsceEvaluatorHandoff()
+              || isOsceEvaluatedHandoff()
+            )
+          );
+        allow delete: if isOwner(participantId) || isAppAdmin();
+      }
+    }
+
+    match /osce_evaluations/{evaluationId} {
+      allow read: if isSignedIn();
+      allow create: if isEvaluationEvaluatorOnCreate();
+      allow update: if isEvaluationEvaluator() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    function liveEventHostId() {
+      return resource.data.get('hostId', '');
+    }
+
+    function isLiveEventHost() {
+      return isSignedIn()
+        && liveEventHostId() != ''
+        && liveEventHostId() == request.auth.uid;
+    }
+
+    /// Inscrição: apenas contadores globais (join).
+    function isLiveEventJoinCounterUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['participantCount', 'survivorCount', 'updatedAt']);
+    }
+
+    function isLiveEventCoordinator() {
+      return isAppAdmin() || isLiveEventHost();
+    }
+
+    match /live_events/{eventId} {
+      allow read: if isSignedIn();
+      allow create: if isAppAdmin()
+        && request.resource.data.hostId == request.auth.uid;
+      allow delete: if isAppAdmin();
+      allow update: if isLiveEventCoordinator()
+        || isLiveEventJoinCounterUpdate();
+
+      match /participants/{participantId} {
+        allow read: if isSignedIn();
+        allow create: if isOwner(participantId) || isAppAdmin();
+        allow update: if isOwner(participantId) || isAppAdmin();
+        allow delete: if isAppAdmin();
+      }
+
+      /// Registro de payout antes de creditar XP em users (D2 — anti-abuso).
+      match /reward_payouts/{targetUserId} {
+        allow read: if isSignedIn()
+          && (
+            isOwner(targetUserId)
+            || isLiveEventCoordinatorForEvent(eventId)
+          );
+        allow create: if isLiveEventCoordinatorForEvent(eventId)
+          && request.resource.data.grantedBy == request.auth.uid
+          && request.resource.data.targetUserId == targetUserId
+          && request.resource.data.eventId == eventId
+          && request.resource.data.xpAmount is int
+          && request.resource.data.xpAmount >= 0;
+        allow update, delete: if false;
+      }
+    }
+
+    match /notificacoes_admin/{docId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /global_messages/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // F1 — coleção legada: somente leitura (migração para users). Sem novas escritas.
+    match /usuarios/{userId} {
+      allow read: if isOwner(userId) || isAppAdmin();
+      allow write: if false;
+      match /{subcollection}/{docId} {
+        allow read: if isOwner(userId) || isAppAdmin();
+        allow write: if false;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Plataforma — assinaturas, pagamentos, comercial (preparado para crescimento)
+    // Coleções novas; não alteram regras legadas acima.
+    // -------------------------------------------------------------------------
+
+    function isPlatformCatalogReader() {
+      return isSignedIn();
+    }
+
+    function isSubscriptionOwner() {
+      return isSignedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    function isSubscriptionOwnerOnCreate() {
+      return isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+    }
+
+    function isPaymentOwner() {
+      return isSignedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    match /platform_subscription_plans/{planId} {
+      allow read: if isPlatformCatalogReader()
+        && (isAppAdmin() || resource.data.isActive == true);
+      allow create, update, delete: if isAppAdmin();
+    }
+
+    match /platform_subscriptions/{subscriptionId} {
+      allow read: if isAppAdmin() || isSubscriptionOwner();
+      // Apenas admin (grant manual) ou Cloud Functions (Admin SDK). Webhook ativa premium.
+      allow create, update, delete: if isAppAdmin();
+    }
+
+    match /platform_payments/{paymentId} {
+      allow read: if isAppAdmin() || isPaymentOwner();
+      // Pagamentos criados apenas via Cloud Function (Admin SDK). Cliente não grava status.
+      allow create, update, delete: if isAppAdmin();
+    }
+
+    match /platform_sellers/{sellerId} {
+      allow read: if isPlatformCatalogReader();
+      allow write: if isAppAdmin();
+    }
+
+    match /platform_affiliates/{affiliateId} {
+      allow read: if isPlatformCatalogReader();
+      allow write: if isAppAdmin();
+    }
+
+    match /platform_coupons/{couponId} {
+      allow read: if isPlatformCatalogReader()
+        && (isAppAdmin() || resource.data.isActive == true);
+      allow write: if isAppAdmin();
+    }
+
+    match /platform_partnerships/{partnershipId} {
+      allow read: if isAppAdmin();
+      allow write: if isAppAdmin();
+    }
+
+    match /platform_ad_campaigns/{campaignId} {
+      allow read: if isPlatformCatalogReader()
+        && (isAppAdmin() || resource.data.adminStatus == 'active');
+      allow write: if isAppAdmin();
+    }
+
+    match /platform_advertisements/{adId} {
+      allow read: if isPlatformCatalogReader()
+        && (isAppAdmin() || resource.data.isActive == true);
+      allow write: if isAppAdmin();
+    }
+
+    // Rate limits — somente Cloud Functions (Admin SDK).
+    match /platform_rate_limits/{docId} {
+      allow read, write: if false;
+    }
+
+    match /platform_feature_flags/{flagId} {
+      allow read: if isSignedIn();
+      allow create, update: if isAppAdmin();
+      allow delete: if false;
+    }
+
+    match /platform_audit_logs/{logId} {
+      allow read: if isAppAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    match /platform_analytics_events/{eventId} {
+      allow read: if isAppAdmin();
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['eventName', 'userId', 'parameters', 'createdAt', 'expireAt']);
+      allow update, delete: if false;
+    }
+
+    match /platform_analytics_daily/{dayId} {
+      allow read: if isAppAdmin();
+      allow create, update: if isSignedIn();
+      allow delete: if isAppAdmin();
+
+      match /active_users/{userId} {
+        allow read: if isAppAdmin();
+        allow create, update: if isSignedIn() && request.auth.uid == userId;
+        allow delete: if isAppAdmin();
+      }
+    }
+
+    match /platform_push_campaigns/{campaignId} {
+      allow read: if isAppAdmin();
+      allow write: if false;
+    }
+
+    match /platform_fcm_users/{userId} {
+      allow read: if isAppAdmin();
+      allow write: if false;
+    }
+
+    match /users/{userId}/platform_notifications/{notificationId} {
+      allow read, update: if isOwner(userId) || isAppAdmin();
+      allow create: if isAppAdmin()
+        || (isSignedIn() && request.resource.data.userId == userId);
+      allow delete: if isOwner(userId) || isAppAdmin();
+    }
+
+    match /users/{userId}/platform_entitlements/{entitlementId} {
+      allow read: if isOwner(userId) || isAppAdmin();
+      allow write: if isAppAdmin();
+    }
+
+    // Simulados Revalida Oficial — titular grava e lê os próprios resultados.
+    match /revalida_simulations/{simulationId} {
+      allow read: if isSignedIn()
+        && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.totalQuestions is int
+        && request.resource.data.score is number;
+      allow update, delete: if isAppAdmin()
+        || (isSignedIn() && resource.data.uid == request.auth.uid);
+    }
+
+    // -------------------------------------------------------------------------
+    // RBAC — papéis e permissões dinâmicas
+    // -------------------------------------------------------------------------
+    match /platform_rbac_permissions/{permissionId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAppAdmin();
+    }
+
+    match /platform_rbac_roles/{roleId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAppAdmin();
+    }
+  }
+}

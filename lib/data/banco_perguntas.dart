@@ -12,13 +12,13 @@ class BancoPerguntas {
       subtema: 'Dor torácica',
     ),
     Pergunta(
-  id: 'p7',
-  enunciado: 'Paciente 25a dor torácica súbita ECG normal?',
-  resposta: 'Ansiedade/pânico. ECG normal exclui IAM agudo.',
-  materia: 'Clínica Médica',
-  tema: 'Cardiologia',
-  subtema: 'Dor torácica',
-),
+      id: 'p7',
+      enunciado: 'Paciente 25a dor torácica súbita ECG normal?',
+      resposta: 'Ansiedade/pânico. ECG normal exclui IAM agudo.',
+      materia: 'Clínica Médica',
+      tema: 'Cardiologia',
+      subtema: 'Dor torácica',
+    ),
     Pergunta(
       id: 'p2',
       enunciado: 'HAS estágio 1 sem lesão órgão-alvo?',
@@ -35,7 +35,7 @@ class BancoPerguntas {
       tema: 'Pneumonias',
       subtema: 'Comunitária',
     ),
-    
+
     // CIRURGIA GERAL
     Pergunta(
       id: 'p3',
@@ -53,7 +53,7 @@ class BancoPerguntas {
       tema: 'Vesícula Biliar',
       subtema: 'Colecistite',
     ),
-    
+
     // PEDIATRIA
     Pergunta(
       id: 'p4',

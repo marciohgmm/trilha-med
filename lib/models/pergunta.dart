@@ -13,12 +13,17 @@ class Pergunta {
   final String imagemResposta;
   final String explicacao;
 
+  /// Nome do arquivo em [assets/images/Imagenscard/] (só nome + extensão).
+  final String imagemPerguntaLocal;
+  final String imagemRespostaLocal;
+  final String imagemExplicacaoLocal;
+
   Pergunta({
     required this.id,
     required this.enunciado,
     required this.resposta,
     required this.materia,
-    required this.tema,
+    this.tema = '',
     required this.subtema,
     this.dificuldade = 1,
     this.tags = const [],
@@ -27,6 +32,9 @@ class Pergunta {
     this.imagemPergunta = '',
     this.imagemResposta = '',
     this.explicacao = '',
+    this.imagemPerguntaLocal = '',
+    this.imagemRespostaLocal = '',
+    this.imagemExplicacaoLocal = '',
   });
 
   // 🔥 CONVERTER FIREBASE → OBJETO
@@ -40,10 +48,13 @@ class Pergunta {
       subtema: map['subtema'] ?? '',
       dificuldade: map['dificuldade'] ?? 1,
       tags: List<String>.from(map['tags'] ?? []),
-
       imagemPergunta: map['imagemPergunta'] ?? '',
       imagemResposta: map['imagemResposta'] ?? '',
       explicacao: map['explicacao'] ?? '',
+      imagemPerguntaLocal: (map['imagemPerguntaLocal'] ?? '').toString().trim(),
+      imagemRespostaLocal: (map['imagemRespostaLocal'] ?? '').toString().trim(),
+      imagemExplicacaoLocal:
+          (map['imagemExplicacaoLocal'] ?? '').toString().trim(),
     );
   }
 
@@ -53,14 +64,16 @@ class Pergunta {
       'pergunta': enunciado,
       'resposta': resposta,
       'materia': materia,
-      'tema': tema,
+      'tema': '',
       'subtema': subtema,
       'dificuldade': dificuldade,
       'tags': tags,
-
       'imagemPergunta': imagemPergunta,
       'imagemResposta': imagemResposta,
       'explicacao': explicacao,
+      'imagemPerguntaLocal': imagemPerguntaLocal,
+      'imagemRespostaLocal': imagemRespostaLocal,
+      'imagemExplicacaoLocal': imagemExplicacaoLocal,
     };
   }
 }

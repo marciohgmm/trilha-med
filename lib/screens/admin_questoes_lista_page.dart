@@ -6,13 +6,11 @@ import 'package:flutter_application_1/services/questao_service.dart';
 
 class AdminQuestoesListaPage extends StatefulWidget {
   final String materia;
-  final String tema;
   final String subtema;
 
   const AdminQuestoesListaPage({
     super.key,
     required this.materia,
-    required this.tema,
     required this.subtema,
   });
 
@@ -126,7 +124,6 @@ class _AdminQuestoesListaPageState extends State<AdminQuestoesListaPage> {
       final query = await FirebaseFirestore.instance
           .collection('questoes')
           .where('materia', isEqualTo: widget.materia)
-          .where('tema', isEqualTo: widget.tema)
           .where('subtema', isEqualTo: widget.subtema)
           .get();
 
@@ -146,7 +143,9 @@ class _AdminQuestoesListaPageState extends State<AdminQuestoesListaPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao excluir em lote: $e'), backgroundColor: Colors.red),
+        SnackBar(
+            content: Text('Erro ao excluir em lote: $e'),
+            backgroundColor: Colors.red),
       );
     }
   }
@@ -185,7 +184,6 @@ class _AdminQuestoesListaPageState extends State<AdminQuestoesListaPage> {
             MaterialPageRoute(
               builder: (_) => CriarQuestaoPage(
                 initialMateria: widget.materia,
-                initialTema: widget.tema,
                 initialSubtema: widget.subtema,
               ),
             ),
@@ -206,7 +204,6 @@ class _AdminQuestoesListaPageState extends State<AdminQuestoesListaPage> {
         stream: FirebaseFirestore.instance
             .collection('questoes')
             .where('materia', isEqualTo: widget.materia)
-            .where('tema', isEqualTo: widget.tema)
             .where('subtema', isEqualTo: widget.subtema)
             .snapshots(),
         builder: (context, snapshot) {
@@ -236,8 +233,9 @@ class _AdminQuestoesListaPageState extends State<AdminQuestoesListaPage> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                   side: BorderSide(
-                    color:
-                        selecionado ? const Color(0xFF1E3A8A) : Colors.transparent,
+                    color: selecionado
+                        ? const Color(0xFF1E3A8A)
+                        : Colors.transparent,
                     width: 1.4,
                   ),
                 ),
@@ -262,7 +260,8 @@ class _AdminQuestoesListaPageState extends State<AdminQuestoesListaPage> {
                   ),
                   subtitle: Padding(
                     padding: const EdgeInsets.only(top: 8),
-                    child: Text('${widget.materia} • ${widget.tema} • ${widget.subtema}'),
+                    child: Text(
+                        '${widget.materia} • ${widget.subtema}'),
                   ),
                   trailing: !_modoSelecao
                       ? PopupMenuButton<String>(
@@ -302,4 +301,3 @@ class _AdminQuestoesListaPageState extends State<AdminQuestoesListaPage> {
     );
   }
 }
-

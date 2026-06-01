@@ -2,7 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../screens/criar_cronograma_page.dart';
-import '../screens/subtemas_page.dart';
+import '../screens/tela_flashcards.dart';
 import '../services/cronograma_service.dart';
 
 class CronogramaPage extends StatelessWidget {
@@ -32,16 +32,15 @@ class CronogramaPage extends StatelessWidget {
   void _irParaSubtema(
     BuildContext context,
     String materia,
-    String tema,
     String subtema,
   ) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => SubtemasPage(
+        builder: (_) => TelaFlashcards(
           userId: userId,
           materia: materia,
-          tema: tema,
+          subtema: subtema,
         ),
       ),
     );
@@ -50,6 +49,9 @@ class CronogramaPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final service = CronogramaService();
+    final hojeRaw = DateTime.now();
+    final ehFimDeSemana = hojeRaw.weekday == DateTime.saturday ||
+        hojeRaw.weekday == DateTime.sunday;
 
     return Scaffold(
       appBar: AppBar(
@@ -71,171 +73,218 @@ class CronogramaPage extends StatelessWidget {
           ),
         ],
       ),
-      body: StreamBuilder<DocumentSnapshot>(
-        stream: service.metaCronograma(userId),
-        builder: (context, metaSnapshot) {
-          if (metaSnapshot.connectionState == ConnectionState.waiting) {
+      body: FutureBuilder<void>(
+        future: service.sincronizarSubtemas(userId),
+        builder: (context, syncSnapshot) {
+          if (syncSnapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final rawMeta = metaSnapshot.data?.data();
-          final metaData = rawMeta is Map<String, dynamic> ? rawMeta : null;
+          if (syncSnapshot.hasError) {
+            return Center(
+              child:
+                  Text('Erro ao sincronizar cronograma: ${syncSnapshot.error}'),
+            );
+          }
 
-          final dataProva = metaData != null && metaData['dataProva'] != null
-              ? (metaData['dataProva'] as Timestamp).toDate()
-              : null;
-
-          return StreamBuilder<QuerySnapshot>(
-            stream: service.itensDeHoje(userId),
-            builder: (context, itensSnapshot) {
-              if (itensSnapshot.connectionState == ConnectionState.waiting) {
+          return StreamBuilder<DocumentSnapshot>(
+            stream: service.metaCronograma(userId),
+            builder: (context, metaSnapshot) {
+              if (metaSnapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
 
-              if (itensSnapshot.hasError) {
+              if (metaSnapshot.hasError) {
                 return Center(
                   child: Text(
-                    'Erro ao carregar cronograma: ${itensSnapshot.error}',
-                  ),
+                      'Erro ao carregar cronograma: ${metaSnapshot.error}'),
                 );
               }
 
-              final todosItens = itensSnapshot.data?.docs ?? [];
-              final hoje = _somenteData(DateTime.now());
+              final rawMeta = metaSnapshot.data?.data();
+              final metaData = rawMeta is Map<String, dynamic> ? rawMeta : null;
 
-              final novos = todosItens.where((doc) {
-                final data = doc.data() as Map<String, dynamic>?;
-                if (data == null) return false;
-
-                final dataEstudoTs = data['dataEstudo'];
-                if (dataEstudoTs is! Timestamp) return false;
-
-                final dataEstudo = _somenteData(dataEstudoTs.toDate());
-                return dataEstudo == hoje;
-              }).toList();
+              final dataProva =
+                  metaData != null && metaData['dataProva'] != null
+                      ? (metaData['dataProva'] as Timestamp).toDate()
+                      : null;
 
               return StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(userId)
-                    .collection('progresso')
-                    .snapshots(),
-                builder: (context, progressoSnapshot) {
-                  if (progressoSnapshot.connectionState ==
+                stream: service.itensDeHoje(userId),
+                builder: (context, itensSnapshot) {
+                  if (itensSnapshot.connectionState ==
                       ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  final progressoDocs = progressoSnapshot.data?.docs ?? [];
+                  if (itensSnapshot.hasError) {
+                    return Center(
+                      child: Text(
+                          'Erro ao carregar cronograma: ${itensSnapshot.error}'),
+                    );
+                  }
 
-                  final revisoesHoje = progressoDocs.where((doc) {
+                  final todosItens = itensSnapshot.data?.docs ?? [];
+                  final hoje = _somenteData(DateTime.now());
+
+                  final novos = todosItens.where((doc) {
                     final data = doc.data() as Map<String, dynamic>?;
                     if (data == null) return false;
 
-                    final ts = data['proximaRevisao'];
-                    if (ts is! Timestamp) return false;
+                    final dataEstudoTs = data['dataEstudo'];
+                    if (dataEstudoTs is! Timestamp) return false;
 
-                    final proximaRevisao = _somenteData(ts.toDate());
-                    return !proximaRevisao.isAfter(hoje);
+                    final dataEstudo = _somenteData(dataEstudoTs.toDate());
+                    return dataEstudo == hoje;
                   }).toList();
 
-                  final diasRestantes =
-                      dataProva != null ? _diasRestantes(dataProva) : 0;
+                  return StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(userId)
+                        .collection('progresso')
+                        .snapshots(),
+                    builder: (context, progressoSnapshot) {
+                      if (progressoSnapshot.connectionState ==
+                          ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
 
-                  return ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Seu plano hoje',
-                                style: TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                      if (progressoSnapshot.hasError) {
+                        return Center(
+                          child: Text(
+                            'Erro ao carregar revisões: ${progressoSnapshot.error}',
+                          ),
+                        );
+                      }
+
+                      final progressoDocs = progressoSnapshot.data?.docs ?? [];
+
+                      final revisoesHoje = progressoDocs.where((doc) {
+                        final data = doc.data() as Map<String, dynamic>?;
+                        if (data == null) return false;
+
+                        final ts = data['proximaRevisao'];
+                        if (ts is! Timestamp) return false;
+
+                        final proximaRevisao = _somenteData(ts.toDate());
+                        // Apenas as revisões do dia (não acumula atrasadas nem adianta futuras).
+                        return proximaRevisao == hoje;
+                      }).toList();
+
+                      final diasRestantes =
+                          dataProva != null ? _diasRestantes(dataProva) : 0;
+
+                      return ListView(
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Seu plano hoje',
+                                    style: TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  if (dataProva != null) ...[
+                                    Text(
+                                        '📅 Prova: ${_formatarData(dataProva)}'),
+                                    Text('⏳ Faltam: $diasRestantes dias'),
+                                  ] else
+                                    const Text('⚠️ Defina a data da prova'),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    '🆕 Conteúdo novo hoje: ${ehFimDeSemana ? 0 : novos.length}',
+                                  ),
+                                  Text(
+                                      '🔥 Revisões hoje: ${revisoesHoje.length}'),
+                                  if (ehFimDeSemana) ...[
+                                    const SizedBox(height: 6),
+                                    const Text(
+                                      'Sábado e domingo: sem conteúdo novo (apenas revisões).',
+                                      style: TextStyle(color: Colors.black54),
+                                    ),
+                                  ],
+                                ],
                               ),
-                              const SizedBox(height: 10),
-                              if (dataProva != null) ...[
-                                Text('📅 Prova: ${_formatarData(dataProva)}'),
-                                Text('⏳ Faltam: $diasRestantes dias'),
-                              ] else
-                                const Text('⚠️ Defina a data da prova'),
-                              const SizedBox(height: 8),
-                              Text('🆕 Conteúdo novo hoje: ${novos.length}'),
-                              Text('🔥 Revisões hoje: ${revisoesHoje.length}'),
-                            ],
+                            ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-
-                      if (revisoesHoje.isNotEmpty) ...[
-                        const Text(
-                          '🔥 Revisões de hoje',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
+                          const SizedBox(height: 20),
+                          const Text(
+                            '🆕 Conteúdo novo',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                        ...revisoesHoje.map(
-                          (doc) {
-                            final data = doc.data() as Map<String, dynamic>;
-                            return _ItemCronograma(
-                              titulo: data['materia'] ?? '',
-                              subtitulo:
-                                  '${data['tema'] ?? ''} • ${data['subtema'] ?? ''}',
-                              icone: Icons.refresh,
-                              onTap: () {
-                                _irParaSubtema(
-                                  context,
-                                  data['materia'] ?? '',
-                                  data['tema'] ?? '',
-                                  data['subtema'] ?? '',
+                          const SizedBox(height: 10),
+                          if (ehFimDeSemana)
+                            const Text(
+                                'Fim de semana: sem conteúdo novo programado.')
+                          else if (novos.isEmpty)
+                            const Text(
+                                'Nenhum conteúdo novo programado para hoje.')
+                          else ...[
+                            ...novos.map(
+                              (doc) {
+                                final data = doc.data() as Map<String, dynamic>;
+                                return _ItemCronograma(
+                                  titulo: data['materia'] ?? '',
+                                  subtitulo:
+                                      '${data['materia'] ?? ''} • ${data['subtema'] ?? ''}',
+                                  icone: Icons.new_releases,
+                                  onTap: () {
+                                    _irParaSubtema(
+                                      context,
+                                      data['materia'] ?? '',
+                                      data['subtema'] ?? '',
+                                    );
+                                  },
                                 );
                               },
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 20),
-                      ],
-
-                      const Text(
-                        '🆕 Conteúdo novo',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-
-                      if (novos.isEmpty)
-                        const Text('Nenhum conteúdo novo programado para hoje.')
-                      else
-                        ...novos.map(
-                          (doc) {
-                            final data = doc.data() as Map<String, dynamic>;
-                            return _ItemCronograma(
-                              titulo: data['materia'] ?? '',
-                              subtitulo:
-                                  '${data['tema'] ?? ''} • ${data['subtema'] ?? ''}',
-                              icone: Icons.new_releases,
-                              onTap: () {
-                                _irParaSubtema(
-                                  context,
-                                  data['materia'] ?? '',
-                                  data['tema'] ?? '',
-                                  data['subtema'] ?? '',
+                            ),
+                            const SizedBox(height: 20),
+                          ],
+                          if (revisoesHoje.isNotEmpty) ...[
+                            const Text(
+                              '🔥 Revisões de hoje',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ...revisoesHoje.map(
+                              (doc) {
+                                final data = doc.data() as Map<String, dynamic>;
+                                return _ItemCronograma(
+                                  titulo: data['materia'] ?? '',
+                                  subtitulo:
+                                      '${data['materia'] ?? ''} • ${data['subtema'] ?? ''}',
+                                  icone: Icons.refresh,
+                                  onTap: () {
+                                    _irParaSubtema(
+                                      context,
+                                      data['materia'] ?? '',
+                                      data['subtema'] ?? '',
+                                    );
+                                  },
                                 );
                               },
-                            );
-                          },
-                        ),
-                    ],
+                            ),
+                          ] else ...[
+                            const SizedBox(height: 10),
+                            const Text('Nenhuma revisão programada para hoje.'),
+                          ],
+                        ],
+                      );
+                    },
                   );
                 },
               );

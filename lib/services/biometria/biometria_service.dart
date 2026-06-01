@@ -6,23 +6,16 @@ class BiometriaService {
 
   Future<bool> dispositivoSuportaBiometria() async {
     try {
-      final canCheckBiometrics = await _autenticador.canCheckBiometrics;
       final deviceSupported = await _autenticador.isDeviceSupported();
-      final availableBiometrics = await _autenticador.getAvailableBiometrics();
+      if (!deviceSupported) return false;
 
-      final suporta = availableBiometrics.isNotEmpty || deviceSupported;
+      final canCheck = await _autenticador.canCheckBiometrics;
+      final available = await _autenticador.getAvailableBiometrics();
 
-      debugPrint(
-        '[BiometriaService] Suporte a biometria: '
-        'canCheckBiometrics=$canCheckBiometrics, '
-        'isDeviceSupported=$deviceSupported, '
-        'availableBiometrics=$availableBiometrics, '
-        'suporta=$suporta',
-      );
-
-      return suporta;
+      // Em muitos aparelhos PIN/padrão conta como "device credential".
+      return canCheck || available.isNotEmpty || deviceSupported;
     } catch (e, stackTrace) {
-      debugPrint('[BiometriaService] Erro verificando suporte a biometria: $e');
+      debugPrint('[BiometriaService] Erro verificando suporte: $e');
       debugPrint(stackTrace.toString());
       return false;
     }
@@ -30,24 +23,22 @@ class BiometriaService {
 
   Future<bool> autenticarComBiometria() async {
     try {
-      final availableBiometrics = await _autenticador.getAvailableBiometrics();
       final deviceSupported = await _autenticador.isDeviceSupported();
-      final suporta = availableBiometrics.isNotEmpty || deviceSupported;
-
-      if (!suporta) {
-        debugPrint('[BiometriaService] Autenticação cancelada: dispositivo sem suporte.');
+      if (!deviceSupported) {
+        debugPrint('[BiometriaService] Dispositivo sem autenticação local.');
         return false;
       }
 
-      final autenticado = await _autenticador.authenticate(
+      return await _autenticador.authenticate(
         localizedReason:
-            'Use sua biometria ou método do dispositivo para continuar',
-        biometricOnly: availableBiometrics.isNotEmpty,
-        persistAcrossBackgrounding: false,
+            'Confirme sua identidade para entrar no Trilha Med',
+        biometricOnly: false,
         sensitiveTransaction: true,
+        persistAcrossBackgrounding: true,
       );
-
-      return autenticado;
+    } on LocalAuthException catch (e) {
+      debugPrint('[BiometriaService] LocalAuthException: ${e.code}');
+      return false;
     } catch (e, stackTrace) {
       debugPrint('[BiometriaService] Falha na autenticação: $e');
       debugPrint(stackTrace.toString());

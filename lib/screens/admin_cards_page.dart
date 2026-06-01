@@ -1,15 +1,14 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'criar_flashcard_page.dart';
 
 class AdminCardsPage extends StatefulWidget {
   final String materia;
-  final String tema;
   final String subtema;
 
   const AdminCardsPage({
     super.key,
     required this.materia,
-    required this.tema,
     required this.subtema,
   });
 
@@ -40,98 +39,15 @@ class _AdminCardsPageState extends State<AdminCardsPage> {
 
   Future<void> _editarCard(DocumentSnapshot doc) async {
     final data = doc.data() as Map<String, dynamic>;
-
-    final perguntaController = TextEditingController(
-      text: (data['pergunta'] ?? data['enunciado'] ?? '').toString(),
-    );
-    final respostaController = TextEditingController(
-      text: (data['resposta'] ?? '').toString(),
-    );
-
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Editar card'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: perguntaController,
-                  maxLines: 5,
-                  decoration: const InputDecoration(
-                    labelText: 'Pergunta / Enunciado',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: respostaController,
-                  maxLines: 6,
-                  decoration: const InputDecoration(
-                    labelText: 'Resposta',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Salvar'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmar != true) return;
-
-    final novaPergunta = perguntaController.text.trim();
-    final novaResposta = respostaController.text.trim();
-
-    if (novaPergunta.isEmpty || novaResposta.isEmpty) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Pergunta e resposta não podem ficar vazias.'),
-          backgroundColor: Colors.red,
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CriarFlashcardPage(
+          cardId: doc.id,
+          dados: data,
         ),
-      );
-      return;
-    }
-
-    try {
-      await doc.reference.update({
-        'pergunta': novaPergunta,
-        'enunciado': novaPergunta,
-        'resposta': novaResposta,
-      });
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Card atualizado com sucesso!'),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao atualizar card: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+      ),
+    );
   }
 
   Future<void> _excluirCard(DocumentSnapshot doc) async {
@@ -212,7 +128,6 @@ class _AdminCardsPageState extends State<AdminCardsPage> {
       final query = await FirebaseFirestore.instance
           .collection('flashcards')
           .where('materia', isEqualTo: widget.materia)
-          .where('tema', isEqualTo: widget.tema)
           .where('subtema', isEqualTo: widget.subtema)
           .get();
 
@@ -248,8 +163,7 @@ class _AdminCardsPageState extends State<AdminCardsPage> {
   }
 
   String _textoPergunta(Map<String, dynamic> data) {
-    return (data['pergunta'] ?? data['enunciado'] ?? 'Sem pergunta')
-        .toString();
+    return (data['pergunta'] ?? data['enunciado'] ?? 'Sem pergunta').toString();
   }
 
   String _textoResposta(Map<String, dynamic> data) {
@@ -283,7 +197,6 @@ class _AdminCardsPageState extends State<AdminCardsPage> {
         stream: FirebaseFirestore.instance
             .collection('flashcards')
             .where('materia', isEqualTo: widget.materia)
-            .where('tema', isEqualTo: widget.tema)
             .where('subtema', isEqualTo: widget.subtema)
             .snapshots(),
         builder: (context, snapshot) {
@@ -323,7 +236,8 @@ class _AdminCardsPageState extends State<AdminCardsPage> {
                 child: ListTile(
                   contentPadding: const EdgeInsets.all(18),
                   leading: CircleAvatar(
-                    backgroundColor: const Color(0xFF1E3A8A).withValues(alpha: 0.10),
+                    backgroundColor:
+                        const Color(0xFF1E3A8A).withValues(alpha: 0.10),
                     child: Icon(
                       selecionado ? Icons.check : Icons.style_outlined,
                       color: const Color(0xFF1E3A8A),

@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import 'admin_questoes_temas_page.dart';
+import 'admin_questoes_subtemas_page.dart';
 import 'criar_questao_page.dart';
 
 class AdminQuestoesMateriasPage extends StatefulWidget {
@@ -25,11 +25,11 @@ class _AdminQuestoesMateriasPageState extends State<AdminQuestoesMateriasPage> {
     return mapa;
   }
 
-  void _abrirTemas(String materia) {
+  void _abrirSubtemas(String materia) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => AdminQuestoesTemasPage(materia: materia),
+        builder: (_) => AdminQuestoesSubtemasPage(materia: materia),
       ),
     );
   }
@@ -124,7 +124,7 @@ class _AdminQuestoesMateriasPageState extends State<AdminQuestoesMateriasPage> {
                     size: 16,
                     color: Color(0xFF1E3A8A),
                   ),
-                  onTap: () => _abrirTemas(materia),
+                  onTap: () => _abrirSubtemas(materia),
                 ),
               );
             },
@@ -134,4 +134,3 @@ class _AdminQuestoesMateriasPageState extends State<AdminQuestoesMateriasPage> {
     );
   }
 }
-

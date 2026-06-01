@@ -38,7 +38,12 @@ class EstatisticasQuestoesPage extends StatelessWidget {
             );
           }
 
-          final porMateria = <String, ({int total, int erros, Map<String, ({int total, int erros})> porTema})>{};
+          final porMateria = <String,
+              ({
+            int total,
+            int erros,
+            Map<String, ({int total, int erros})> porTema
+          })>{};
 
           for (final d in docs) {
             final data = d.data();
@@ -49,7 +54,11 @@ class EstatisticasQuestoesPage extends StatelessWidget {
 
             porMateria.putIfAbsent(
               materia,
-              () => (total: 0, erros: 0, porTema: <String, ({int total, int erros})>{}),
+              () => (
+                total: 0,
+                erros: 0,
+                porTema: <String, ({int total, int erros})>{}
+              ),
             );
 
             final current = porMateria[materia]!;
@@ -63,7 +72,8 @@ class EstatisticasQuestoesPage extends StatelessWidget {
               erros: temaStats.erros + (acertou ? 0 : 1),
             );
 
-            porMateria[materia] = (total: total, erros: erros, porTema: current.porTema);
+            porMateria[materia] =
+                (total: total, erros: erros, porTema: current.porTema);
           }
 
           final materias = porMateria.keys.toList()..sort();
@@ -74,11 +84,13 @@ class EstatisticasQuestoesPage extends StatelessWidget {
             itemBuilder: (context, index) {
               final materia = materias[index];
               final stats = porMateria[materia]!;
-              final taxaErro = stats.total == 0 ? 0.0 : stats.erros / stats.total;
+              final taxaErro =
+                  stats.total == 0 ? 0.0 : stats.erros / stats.total;
 
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16)),
                 child: ListTile(
                   contentPadding: const EdgeInsets.all(18),
                   leading: Container(
@@ -88,7 +100,8 @@ class EstatisticasQuestoesPage extends StatelessWidget {
                       color: const Color(0xFF1E3A8A).withValues(alpha: 0.10),
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    child: const Icon(Icons.bar_chart, color: Color(0xFF1E3A8A)),
+                    child:
+                        const Icon(Icons.bar_chart, color: Color(0xFF1E3A8A)),
                   ),
                   title: Text(
                     materia,
@@ -153,15 +166,20 @@ class _EstatisticaMateriaDetalhePage extends StatelessWidget {
           final tema = temas[index];
           final s = porTema[tema]!;
           final taxaErro = s.total == 0 ? 0.0 : s.erros / s.total;
-          final cor = taxaErro >= 0.5 ? Colors.red : (taxaErro >= 0.25 ? Colors.orange : Colors.green);
+          final cor = taxaErro >= 0.5
+              ? Colors.red
+              : (taxaErro >= 0.25 ? Colors.orange : Colors.green);
 
           return Card(
             margin: const EdgeInsets.only(bottom: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: ListTile(
               contentPadding: const EdgeInsets.all(18),
-              title: Text(tema, style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text('${s.total} respondidas • ${(100 * taxaErro).toStringAsFixed(0)}% erro'),
+              title: Text(tema,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(
+                  '${s.total} respondidas • ${(100 * taxaErro).toStringAsFixed(0)}% erro'),
               trailing: Icon(Icons.circle, color: cor, size: 14),
             ),
           );
@@ -170,4 +188,3 @@ class _EstatisticaMateriaDetalhePage extends StatelessWidget {
     );
   }
 }
-

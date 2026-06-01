@@ -1,21 +1,47 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
+import '../models/questao_exceptions.dart';
 import '../models/questao_model.dart';
+import '../utils/content_hierarchy_utils.dart';
+import 'questao_materia_stats_service.dart';
+import 'questao_subtema_catalog_service.dart';
 
 class QuestaoService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final QuestaoMateriaStatsService _materiaStats =
+      QuestaoMateriaStatsService.instance;
+  final QuestaoSubtemaCatalogService _subtemaCatalog =
+      QuestaoSubtemaCatalogService.instance;
   static const String collectionQuestoes = 'questoes';
   static const String collectionNotificacoesAdmin = 'notificacoes_admin';
   static const String collectionUsers = 'users';
   static const String subcollectionProgressoQuestoes = 'progresso_questoes';
+  static const String subcollectionQuestaoReports = 'questao_reports';
 
   Stream<List<QuestaoModel>> getTodasQuestoes() {
-    return _firestore.collection(collectionQuestoes).snapshots().map((snapshot) {
+    return _firestore
+        .collection(collectionQuestoes)
+        .snapshots()
+        .map((snapshot) {
       return snapshot.docs
           .map((doc) => QuestaoModel.fromMap(doc.id, doc.data()))
           .toList();
     });
+  }
+
+  Stream<List<QuestaoModel>> getQuestoesPorSubtema({
+    String? materiaId,
+    String? materia,
+    String? subtema,
+    bool somenteAtivas = true,
+  }) {
+    return getQuestoesPorTema(
+      materiaId: materiaId,
+      materia: materia,
+      subtema: subtema,
+      somenteAtivas: somenteAtivas,
+    );
   }
 
   Stream<List<QuestaoModel>> getQuestoesPorTema({
@@ -43,39 +69,75 @@ class QuestaoService {
       query = query.where('materia', isEqualTo: materia);
     }
 
-    if (subtema != null && subtema.isNotEmpty) {
-      query = query.where('subtema', isEqualTo: subtema);
-    }
+    // Subtema filtrado no cliente para evitar índice composto obrigatório no Firestore.
+    final subtemaFiltro = subtema?.trim();
 
     return query.snapshots().map((snapshot) {
       return snapshot.docs
-          .map((doc) => QuestaoModel.fromMap(doc.id, doc.data() as Map<String, dynamic>))
-          .where((questao) => !somenteAtivas || questao.ativo || questao.status == 'ativo')
+          .map((doc) =>
+              QuestaoModel.fromMap(doc.id, doc.data() as Map<String, dynamic>))
+          .where((questao) {
+            if (subtemaFiltro != null &&
+                subtemaFiltro.isNotEmpty &&
+                questao.subtema.trim().toLowerCase() !=
+                    subtemaFiltro.toLowerCase()) {
+              return false;
+            }
+            return !somenteAtivas || questao.disponivelParaEstudo;
+          })
           .toList();
     });
   }
 
   Future<QuestaoModel?> getQuestaoPorId(String id) async {
-    final snapshot = await _firestore.collection(collectionQuestoes).doc(id).get();
+    final snapshot =
+        await _firestore.collection(collectionQuestoes).doc(id).get();
     if (!snapshot.exists) return null;
     return QuestaoModel.fromMap(snapshot.id, snapshot.data()!);
   }
 
-  Future<bool> salvarQuestaoModel(QuestaoModel questao, {bool criar = true}) async {
+  Future<bool> salvarQuestaoModel(QuestaoModel questao,
+      {bool criar = true}) async {
     try {
       final data = questao.toMap();
+      final materia = questao.materia.trim();
+      final subtema = questao.subtema.trim();
 
       if (criar) {
         final docRef = _firestore.collection(collectionQuestoes).doc();
         await docRef.set(data);
+        if (materia.isNotEmpty) {
+          await _materiaStats.incrementMateria(materia);
+        }
+        if (materia.isNotEmpty && subtema.isNotEmpty) {
+          await _subtemaCatalog.registerQuestao(materia, subtema);
+        }
       } else {
         if (questao.id.isEmpty) {
           throw Exception('Questão inválida para atualização.');
         }
-        await _firestore
-            .collection(collectionQuestoes)
-            .doc(questao.id)
-            .set(data, SetOptions(merge: true));
+        final ref =
+            _firestore.collection(collectionQuestoes).doc(questao.id);
+        final snap = await ref.get();
+        final oldM = (snap.data()?['materia'] ?? '').toString().trim();
+        final oldS = (snap.data()?['subtema'] ?? '').toString().trim();
+
+        await ref.set(data, SetOptions(merge: true));
+
+        if (oldM != materia || oldS != subtema) {
+          if (oldM.isNotEmpty) {
+            await _materiaStats.decrementMateria(oldM);
+          }
+          if (oldM.isNotEmpty && oldS.isNotEmpty) {
+            await _subtemaCatalog.unregisterQuestao(oldM, oldS);
+          }
+          if (materia.isNotEmpty) {
+            await _materiaStats.incrementMateria(materia);
+          }
+          if (materia.isNotEmpty && subtema.isNotEmpty) {
+            await _subtemaCatalog.registerQuestao(materia, subtema);
+          }
+        }
       }
 
       return true;
@@ -87,7 +149,17 @@ class QuestaoService {
 
   Future<bool> excluirQuestao(String id) async {
     try {
-      await _firestore.collection(collectionQuestoes).doc(id).delete();
+      final ref = _firestore.collection(collectionQuestoes).doc(id);
+      final snap = await ref.get();
+      final materia = (snap.data()?['materia'] ?? '').toString().trim();
+      final subtema = (snap.data()?['subtema'] ?? '').toString().trim();
+      await ref.delete();
+      if (materia.isNotEmpty) {
+        await _materiaStats.decrementMateria(materia);
+      }
+      if (materia.isNotEmpty && subtema.isNotEmpty) {
+        await _subtemaCatalog.unregisterQuestao(materia, subtema);
+      }
       return true;
     } catch (e) {
       debugPrint('Erro ao excluir questão: $e');
@@ -96,30 +168,22 @@ class QuestaoService {
   }
 
   Future<List<String>> getMaterias() async {
-    final snapshot = await _firestore.collection(collectionQuestoes).get();
-    final set = <String>{};
-    for (final doc in snapshot.docs) {
-      final materia = (doc.data()['materia'] ?? '').toString().trim();
-      if (materia.isNotEmpty) {
-        set.add(materia);
-      }
-    }
-    return set.toList()..sort();
+    final stats = await _materiaStats.fetchMateriaStats();
+    return ContentHierarchyUtils.sortAlphabetically(
+      stats.map((s) => s.name),
+    );
   }
 
-  Future<List<String>> getTemasPorMateria(String materia) async {
-    final snapshot = await _firestore
-        .collection(collectionQuestoes)
-        .where('materia', isEqualTo: materia)
-        .get();
-    final set = <String>{};
-    for (final doc in snapshot.docs) {
-      final tema = (doc.data()['tema'] ?? '').toString().trim();
-      if (tema.isNotEmpty) {
-        set.add(tema);
-      }
-    }
-    return set.toList()..sort();
+  Future<List<String>> getSubtemasPorMateria(String materia) async {
+    return _subtemaCatalog.fetchSubtemasByMateria(materia);
+  }
+
+  Future<List<String>> getTemasPorMateria(String materia) =>
+      getSubtemasPorMateria(materia);
+
+  static String _limTxt(String s, int max) {
+    if (s.length <= max) return s;
+    return '${s.substring(0, max)}…';
   }
 
   Future<void> reportarErroQuestao({
@@ -127,23 +191,53 @@ class QuestaoService {
     required String? userId,
     required String motivo,
   }) async {
-    // Mantém o mesmo padrão do reporte de cards: salva em notificacoes_admin
-    // e inclui um campo "pergunta" para o admin visualizar rapidamente.
+    final uid = userId?.trim() ?? '';
+    final mensagemFinal = motivo.trim().isEmpty
+        ? 'Reporte de questão sem descrição'
+        : motivo.trim();
+
+    if (uid.isNotEmpty) {
+      final reportRef = _firestore
+          .collection(collectionUsers)
+          .doc(uid)
+          .collection(subcollectionQuestaoReports)
+          .doc(questao.id);
+
+      final existing = await reportRef.get();
+      if (existing.exists) {
+        throw QuestaoReportAlreadyExistsException();
+      }
+
+      await reportRef.set({
+        'questaoId': questao.id,
+        'userId': uid,
+        'motivo': _limTxt(mensagemFinal, 2000),
+        'materia': questao.materia,
+        'tema': questao.tema,
+        'subtema': questao.subtema,
+        'criadoEm': FieldValue.serverTimestamp(),
+      });
+    }
+
+    final resumoAlternativas = questao.alternativas
+        .map(
+          (a) => '${a.id}: ${_limTxt(a.texto, 400)}',
+        )
+        .join('\n');
+
     await _firestore.collection(collectionNotificacoesAdmin).add({
       'tipo': 'erro_questao',
       'status': 'novo',
-      'mensagem': motivo,
-      'userId': userId ?? '',
+      'mensagem': _limTxt(mensagemFinal, 2000),
+      'userId': uid,
       'materia': questao.materia,
       'tema': questao.tema,
       'subtema': questao.subtema,
       'temaSlug': questao.temaSlug,
       'questaoId': questao.id,
-      'pergunta': questao.enunciado,
-      'enunciado': questao.enunciado,
-      'alternativas': questao.alternativas.map((a) => a.toMap()).toList(),
+      'enunciado': _limTxt(questao.enunciado, 4000),
       'corretaId': questao.corretaId,
-      'justificativasPorAlternativa': questao.justificativasPorAlternativa,
+      'alternativasResumo': _limTxt(resumoAlternativas, 8000),
       'criadoEm': Timestamp.fromDate(DateTime.now()),
       'atualizadoEm': FieldValue.serverTimestamp(),
     });
@@ -208,7 +302,8 @@ class QuestaoService {
       flashcardId: flashcardId,
       enunciado: enunciado,
       alternativas: const [
-        QuestaoAlternativa(id: 'A', texto: 'Iniciar antibiótico oral de rotina'),
+        QuestaoAlternativa(
+            id: 'A', texto: 'Iniciar antibiótico oral de rotina'),
         QuestaoAlternativa(id: 'B', texto: 'Solicitar tomografia de tórax'),
         QuestaoAlternativa(
           id: 'C',

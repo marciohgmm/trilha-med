@@ -1,19 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../services/questao_service.dart';
+import '../core/analytics/analytics_events.dart';
+import '../core/analytics/analytics_feature_tracker.dart';
 import '../widgets/questao_card.dart';
+import 'login_page.dart';
 
 class QuestoesPage extends StatefulWidget {
   final String userId;
-  final String? materia;
-  final String tema;
+  final String materia;
   final String subtema;
 
   const QuestoesPage({
     super.key,
     required this.userId,
-    this.materia,
-    required this.tema,
+    required this.materia,
     required this.subtema,
   });
 
@@ -21,15 +23,55 @@ class QuestoesPage extends StatefulWidget {
   State<QuestoesPage> createState() => _QuestoesPageState();
 }
 
-class _QuestoesPageState extends State<QuestoesPage> {
+class _QuestoesPageState extends State<QuestoesPage> with AnalyticsFeatureTracker {
   final QuestaoService _service = QuestaoService();
-  bool _modoProxima = false;
+  late bool _modoProxima;
+  bool _mobileDefaultApplied = false;
   final PageController _pageController = PageController();
+  int _paginaAtual = 0;
+
+  Future<void> _fazerLogout() async {
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (route) => false,
+    );
+  }
 
   @override
   void initState() {
     super.initState();
+    _modoProxima = false;
+    trackFeatureOnce(
+      AnalyticsEvents.questionsStudyStart,
+      userId: widget.userId,
+      parameters: {
+        AnalyticsParams.materia: widget.materia,
+        AnalyticsParams.subtema: widget.subtema,
+      },
+    );
   }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_mobileDefaultApplied) return;
+    _mobileDefaultApplied = true;
+    // No celular, modo “uma por vez” evita conflito de scroll com PageView.
+    if (MediaQuery.sizeOf(context).shortestSide < 600) {
+      _modoProxima = true;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  bool get _isMobileLayout => MediaQuery.sizeOf(context).shortestSide < 600;
 
   @override
   Widget build(BuildContext context) {
@@ -37,9 +79,7 @@ class _QuestoesPageState extends State<QuestoesPage> {
       backgroundColor: const Color(0xFFF0F4F8),
       appBar: AppBar(
         title: Text(
-          widget.materia != null
-              ? '${widget.subtema} - ${widget.tema}'
-              : '${widget.subtema} - ${widget.tema}',
+          '${widget.subtema} — ${widget.materia}',
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
@@ -61,12 +101,16 @@ class _QuestoesPageState extends State<QuestoesPage> {
             },
             icon: Icon(_modoProxima ? Icons.view_agenda : Icons.swipe),
           ),
+          IconButton(
+            onPressed: _fazerLogout,
+            icon: const Icon(Icons.logout),
+            tooltip: 'Sair',
+          ),
         ],
       ),
       body: StreamBuilder(
-        stream: _service.getQuestoesPorTema(
+        stream: _service.getQuestoesPorSubtema(
           materia: widget.materia,
-          tema: widget.tema,
           subtema: widget.subtema,
           somenteAtivas: true,
         ),
@@ -81,6 +125,10 @@ class _QuestoesPageState extends State<QuestoesPage> {
                 ),
               ),
             );
+          }
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              !snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
           }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
@@ -129,35 +177,94 @@ class _QuestoesPageState extends State<QuestoesPage> {
             );
           }
 
-          return PageView.builder(
-            controller: _pageController,
-            itemCount: questoes.length,
-            itemBuilder: (context, index) {
-              return ListView(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                children: [
-                  QuestaoCard(
-                    questao: questoes[index],
-                    userId: widget.userId,
-                    showNextButton: index < questoes.length - 1,
-                    onNext: () {
-                      _pageController.nextPage(
-                        duration: const Duration(milliseconds: 250),
-                        curve: Curves.easeOut,
-                      );
-                    },
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      'Questão ${index + 1} de ${questoes.length}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.black54),
+          return Column(
+            children: [
+              Expanded(
+                child: PageView.builder(
+                  controller: _pageController,
+                  physics: _isMobileLayout
+                      ? const NeverScrollableScrollPhysics()
+                      : const ClampingScrollPhysics(),
+                  onPageChanged: (i) => setState(() => _paginaAtual = i),
+                  itemCount: questoes.length,
+                  itemBuilder: (context, index) {
+                    return SingleChildScrollView(
+                      physics: const ClampingScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Column(
+                        children: [
+                          QuestaoCard(
+                            questao: questoes[index],
+                            userId: widget.userId,
+                            showNextButton: index < questoes.length - 1,
+                            onNext: () {
+                              _pageController.nextPage(
+                                duration: const Duration(milliseconds: 250),
+                                curve: Curves.easeOut,
+                              );
+                            },
+                          ),
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 16),
+                            child: Text(
+                              'Questão ${index + 1} de ${questoes.length}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: Colors.black54),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+              if (questoes.length > 1)
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _paginaAtual > 0
+                                ? () {
+                                    _pageController.previousPage(
+                                      duration:
+                                          const Duration(milliseconds: 250),
+                                      curve: Curves.easeOut,
+                                    );
+                                  }
+                                : null,
+                            icon: const Icon(Icons.chevron_left),
+                            label: const Text('Anterior'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: _paginaAtual < questoes.length - 1
+                                ? () {
+                                    _pageController.nextPage(
+                                      duration:
+                                          const Duration(milliseconds: 250),
+                                      curve: Curves.easeOut,
+                                    );
+                                  }
+                                : null,
+                            icon: const Icon(Icons.chevron_right),
+                            label: const Text('Próxima'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF1E3A8A),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              );
-            },
+                ),
+            ],
           );
         },
       ),

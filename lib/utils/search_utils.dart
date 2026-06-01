@@ -5,8 +5,10 @@ Set<String> gerarSearchTerms(String texto) {
   final min = 2;
   final max = 4;
 
-  final sanitized =
-      texto.trim().toLowerCase().replaceAll(RegExp(r'[^a-záàãâéèêíìóòõôúùç]'), '');
+  final sanitized = texto
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-záàãâéèêíìóòõôúùç]'), '');
 
   final terms = <String>{};
 

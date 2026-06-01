@@ -1,17 +1,49 @@
-# flutter_application_1
+# Revalida Cards (TrilhaMed)
 
-A new Flutter project.
+Aplicativo Flutter para estudo (flashcards, questões, simulados, OSCE, fase prática, eventos ao vivo e módulo comercial).
 
-## Getting Started
+**Firebase:** `revalida-cards`
 
-This project is a starting point for a Flutter application.
+## Status do projeto
 
-A few resources to get you started if this is your first Flutter project:
+[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+[![codecov](https://codecov.io/gh/OWNER/REPO/graph/badge.svg)](https://codecov.io/gh/OWNER/REPO)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+> Substitua `OWNER/REPO` no badge de cobertura pelo caminho do seu repositório GitHub (ex.: `marci/revalida-cards`) após conectar o projeto no [Codecov](https://codecov.io).
+
+## Documentação
+
+| Documento | Conteúdo |
+|-----------|----------|
+| [docs/CI_CD.md](docs/CI_CD.md) | Pipeline GitHub Actions, secrets, cobertura |
+| [docs/PRODUCTION_READINESS_REPORT.md](docs/PRODUCTION_READINESS_REPORT.md) | Auditoria de prontidão para produção |
+| [docs/TEST_COVERAGE_REPORT.md](docs/TEST_COVERAGE_REPORT.md) | Cobertura de testes por domínio |
+| [docs/MERCADO_PAGO_IMPLEMENTATION.md](docs/MERCADO_PAGO_IMPLEMENTATION.md) | Checkout e webhook |
+
+## Desenvolvimento local
+
+```bash
+flutter pub get
+flutter analyze lib
+flutter test --coverage
+```
+
+```bash
+cd functions && npm ci && npm test
+```
+
+## CI
+
+A cada **push** e **pull request** nas branches `main`, `master` e `develop`:
+
+1. `flutter analyze` + `flutter test --coverage`  
+2. `npm test` em `functions/`  
+3. Validação de `firestore.rules` e `firestore.indexes.json`  
+
+Sem deploy automático. Detalhes em [docs/CI_CD.md](docs/CI_CD.md).
+
+## Getting Started (Flutter)
+
+- [Documentação Flutter](https://docs.flutter.dev/)
+- [Lab: primeiro app](https://docs.flutter.dev/get-started/codelab)

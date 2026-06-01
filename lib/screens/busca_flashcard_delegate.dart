@@ -1,33 +1,19 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import 'subtemas_page.dart';
+import 'package:flutter_application_1/core/constants/content_query_limits.dart';
+
+import 'package:flutter_application_1/utils/content_hierarchy_utils.dart';
+
+import 'tela_flashcards.dart';
 
 class BuscaFlashcardDelegate extends SearchDelegate<String> {
   final String userId;
 
   BuscaFlashcardDelegate({required this.userId});
 
-  String _normalizar(String texto) {
-    return texto
-        .toLowerCase()
-        .trim()
-        .replaceAll('á', 'a')
-        .replaceAll('à', 'a')
-        .replaceAll('ã', 'a')
-        .replaceAll('â', 'a')
-        .replaceAll('é', 'e')
-        .replaceAll('ê', 'e')
-        .replaceAll('í', 'i')
-        .replaceAll('ó', 'o')
-        .replaceAll('ô', 'o')
-        .replaceAll('õ', 'o')
-        .replaceAll('ú', 'u')
-        .replaceAll('ç', 'c');
-  }
-
   @override
-  String get searchFieldLabel => 'Pesquisar assunto, tema ou subtema';
+  String get searchFieldLabel => 'Pesquisar matéria ou subtema';
 
   @override
   List<Widget>? buildActions(BuildContext context) {
@@ -64,7 +50,7 @@ class BuscaFlashcardDelegate extends SearchDelegate<String> {
   }
 
   Widget _buildListaResultados(BuildContext context) {
-    final termo = _normalizar(query);
+    final termo = ContentHierarchyUtils.normalizeForSearch(query);
 
     if (termo.isEmpty || termo.length < 2) {
       return const Center(
@@ -82,7 +68,7 @@ class BuscaFlashcardDelegate extends SearchDelegate<String> {
       stream: FirebaseFirestore.instance
           .collection('flashcards')
           .where('searchTerms', arrayContains: termo)
-          .limit(30)
+          .limit(ContentQueryLimits.maxSearchResults)
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -115,14 +101,13 @@ class BuscaFlashcardDelegate extends SearchDelegate<String> {
           final data = doc.data() as Map<String, dynamic>;
 
           final materia = (data['materia'] ?? '').toString().trim();
-          final tema = (data['tema'] ?? '').toString().trim();
           final subtema = (data['subtema'] ?? '').toString().trim();
+          if (materia.isEmpty || subtema.isEmpty) continue;
 
-          final chave = '$materia|$tema|$subtema';
+          final chave = ContentHierarchyUtils.subtemaPairKey(materia, subtema);
 
           resultadosUnicos[chave] = {
             'materia': materia,
-            'tema': tema,
             'subtema': subtema,
           };
         }
@@ -130,11 +115,9 @@ class BuscaFlashcardDelegate extends SearchDelegate<String> {
         final resultados = resultadosUnicos.values.toList();
 
         resultados.sort((a, b) {
-          final tituloA =
-              (a['subtema']?.isNotEmpty ?? false) ? a['subtema']! : a['tema']!;
-          final tituloB =
-              (b['subtema']?.isNotEmpty ?? false) ? b['subtema']! : b['tema']!;
-          return tituloA.toLowerCase().compareTo(tituloB.toLowerCase());
+          return ContentHierarchyUtils.normalizeForSearch(a['subtema'] ?? '')
+              .compareTo(
+                  ContentHierarchyUtils.normalizeForSearch(b['subtema'] ?? ''));
         });
 
         return ListView.separated(
@@ -143,7 +126,6 @@ class BuscaFlashcardDelegate extends SearchDelegate<String> {
           itemBuilder: (context, index) {
             final item = resultados[index];
             final materia = item['materia'] ?? '';
-            final tema = item['tema'] ?? '';
             final subtema = item['subtema'] ?? '';
 
             return ListTile(
@@ -151,18 +133,18 @@ class BuscaFlashcardDelegate extends SearchDelegate<String> {
                 Icons.search,
                 color: Color(0xFF1E3A8A),
               ),
-              title: Text(subtema.isNotEmpty ? subtema : tema),
-              subtitle: Text('$materia • $tema'),
+              title: Text(subtema),
+              subtitle: Text(materia),
               trailing: const Icon(Icons.arrow_forward_ios, size: 16),
               onTap: () {
-                close(context, subtema.isNotEmpty ? subtema : tema);
+                close(context, subtema);
 
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => SubtemasPage(
+                    builder: (_) => TelaFlashcards(
                       userId: userId,
                       materia: materia,
-                      tema: tema,
+                      subtema: subtema,
                     ),
                   ),
                 );

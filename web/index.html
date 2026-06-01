@@ -14,7 +14,9 @@
     This is a placeholder for base href that will be replaced by the value of
     the `--base-href` argument provided to `flutter build`.
   -->
-  <base href="$FLUTTER_BASE_HREF">
+  <!-- Raiz "/" evita URLs do tipo assets/assets/... quando o base não é substituído em dev. -->
+  <!-- Em deploy em subpasta, use: flutter build web --base-href="/sua/pasta/" e ajuste aqui. -->
+  <base href="/">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">

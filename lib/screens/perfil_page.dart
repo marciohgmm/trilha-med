@@ -3,7 +3,16 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'login_page.dart';
+import '../services/auth/auth_rate_limit_service.dart';
+import '../services/auth/user_public_profile_service.dart';
 import '../services/study_timer_service.dart';
+import '../utils/report_message_dialog.dart';
+import '../widgets/push/notification_preferences_section.dart';
+import 'commercial/my_subscription_page.dart';
+import 'commercial/plans_page.dart';
+import 'legal/privacy_center_page.dart';
+import 'legal/privacy_policy_page.dart';
+import 'legal/terms_of_use_page.dart';
 
 class PerfilPage extends StatefulWidget {
   final String userId;
@@ -31,15 +40,10 @@ class _PerfilPageState extends State<PerfilPage> {
   int _pauseDuration = 10;
   bool _enableSound = true;
   bool _showFloatingClock = true;
+  bool _showNotificacoesConfig = false;
   bool _showRelogioConfig = false;
-  int _themeModeIndex = 2;
   int _fontSize = 16;
 
-  static const List<String> _themeModeLabels = [
-    'Claro',
-    'Escuro',
-    'Automático',
-  ];
   static const List<int> _fontSizeOptions = [14, 16, 18, 20, 22];
 
   FirebaseFirestore get _firestore => FirebaseFirestore.instance;
@@ -59,7 +63,6 @@ class _PerfilPageState extends State<PerfilPage> {
       _pauseDuration = _timerService.pauseDuration.inMinutes;
       _enableSound = _timerService.enableSound;
       _showFloatingClock = _timerService.showFloatingClock;
-      _themeModeIndex = _timerService.themeModeIndex;
       _fontSize = _timerService.fontSize;
     });
   }
@@ -75,8 +78,7 @@ class _PerfilPageState extends State<PerfilPage> {
         return partes.first.substring(0, 1).toUpperCase();
       }
 
-      return (partes.first.substring(0, 1) +
-              partes.last.substring(0, 1))
+      return (partes.first.substring(0, 1) + partes.last.substring(0, 1))
           .toUpperCase();
     }
 
@@ -104,6 +106,11 @@ class _PerfilPageState extends State<PerfilPage> {
         'email': _auth.currentUser?.email ?? '',
         'atualizadoEm': Timestamp.now(),
       }, SetOptions(merge: true));
+
+      await UserPublicProfileService().syncProfile(
+        userId: widget.userId,
+        displayName: nome.isNotEmpty ? nome : null,
+      );
 
       if (!mounted) return;
 
@@ -145,6 +152,7 @@ class _PerfilPageState extends State<PerfilPage> {
         return;
       }
 
+      await AuthRateLimitService().assertPasswordResetAllowed(email);
       await _auth.sendPasswordResetEmail(email: email);
 
       if (!mounted) return;
@@ -172,111 +180,49 @@ class _PerfilPageState extends State<PerfilPage> {
   }
 
   Future<void> _abrirDialogoSuporte() async {
-    final mensagemController = TextEditingController();
+    if (!mounted) return;
 
-    await showDialog(
+    final mensagem = await showReportTextDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: const Text('Falar com suporte'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Escreva sua dúvida, sugestão ou problema encontrado no app.',
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: mensagemController,
-                maxLines: 5,
-                decoration: InputDecoration(
-                  hintText: 'Digite sua mensagem',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final mensagem = mensagemController.text.trim();
-
-                if (mensagem.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Digite uma mensagem antes de enviar.',
-                      ),
-                    ),
-                  );
-                  return;
-                }
-
-                try {
-                  /// CORRIGIDO:
-                  /// Agora envia para coleção usada pelo admin
-                  await _firestore
-                      .collection('notificacoes_admin')
-                      .add({
-                    'tipo': 'contato_admin',
-                    'status': 'novo',
-                    'userId': widget.userId,
-                    'email': _auth.currentUser?.email ?? '',
-                    'mensagem': mensagem,
-                    'criadoEm': Timestamp.now(),
-                    'atualizadoEm': Timestamp.now(),
-                  });
-
-                  if (mounted) {
-                    // ignore: use_build_context_synchronously
-                    Navigator.pop(context);
-
-                    // ignore: use_build_context_synchronously
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Mensagem enviada para a equipe com sucesso!',
-                        ),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  }
-                } on FirebaseException catch (e) {
-                  if (mounted) {
-                    // ignore: use_build_context_synchronously
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Erro ao enviar mensagem: $e',
-                        ),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1E3A8A),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: const Text('Enviar'),
-            ),
-          ],
-        );
-      },
+      title: 'Falar com suporte',
+      hintText: 'Digite sua mensagem',
+      maxLines: 5,
+      description: const Text(
+        'Escreva sua dúvida, sugestão ou problema encontrado no app.',
+      ),
     );
+
+    if (mensagem == null || mensagem.trim().isEmpty) return;
+
+    try {
+      await _firestore.collection('notificacoes_admin').add({
+        'tipo': 'contato_admin',
+        'status': 'novo',
+        'userId': widget.userId,
+        'email': _auth.currentUser?.email ?? '',
+        'mensagem': mensagem.trim(),
+        'criadoEm': Timestamp.now(),
+        'atualizadoEm': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Mensagem enviada para a equipe com sucesso!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao enviar mensagem: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<void> _abrirSobreApp() async {
@@ -345,7 +291,6 @@ class _PerfilPageState extends State<PerfilPage> {
       enableSound: _enableSound,
       showFloatingClock: _showFloatingClock,
       enablePauseReminder: _enablePauseReminder,
-      themeModeIndex: _themeModeIndex,
       fontSize: _fontSize,
     );
     if (mounted) {
@@ -355,77 +300,60 @@ class _PerfilPageState extends State<PerfilPage> {
     }
   }
 
-  Future<void> _abrirDialogoTema() async {
-    final selecionado = await showDialog<int>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Modo escuro / claro'),
-          content: RadioGroup<int>(
-            groupValue: _themeModeIndex,
-            onChanged: (value) {
-              if (value != null) Navigator.of(context).pop(value);
-            },
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: List<Widget>.generate(
-                _themeModeLabels.length,
-                (index) => ListTile(
-                  title: Text(_themeModeLabels[index]),
-                  trailing: Radio<int>(
-                    value: index,
-                  ),
-                  onTap: () => Navigator.of(context).pop(index),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-
-    if (selecionado != null) {
-      setState(() {
-        _themeModeIndex = selecionado;
-      });
-    }
-  }
-
   Future<void> _abrirDialogoTamanhoFonte() async {
     final selecionado = await showDialog<int>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Tamanho da fonte'),
-          content: RadioGroup<int>(
-            groupValue: _fontSize,
-            onChanged: (value) {
-              if (value != null) Navigator.of(context).pop(value);
-            },
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: _fontSizeOptions.map(
-                (value) {
-                  return ListTile(
-                    title: Text('$value pt'),
-                    trailing: Radio<int>(
-                      value: value,
-                    ),
-                    onTap: () => Navigator.of(context).pop(value),
-                  );
-                },
-              ).toList(),
-            ),
-          ),
+      builder: (dialogContext) {
+        var escolha = _fontSize;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Tamanho da fonte'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: _fontSizeOptions.map(
+                  (value) {
+                    final selected = escolha == value;
+                    return ListTile(
+                      title: Text(
+                        '$value pt',
+                        style: TextStyle(fontSize: value.toDouble()),
+                      ),
+                      trailing: selected
+                          ? const Icon(Icons.check_circle,
+                              color: Color(0xFF1E3A8A))
+                          : const Icon(Icons.circle_outlined),
+                      onTap: () {
+                        setDialogState(() => escolha = value);
+                        Navigator.of(dialogContext).pop(value);
+                      },
+                    );
+                  },
+                ).toList(),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancelar'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
 
-    if (selecionado != null) {
-      setState(() {
-        _fontSize = selecionado;
-      });
-    }
+    if (selecionado == null || !mounted) return;
+
+    setState(() => _fontSize = selecionado);
+    await _timerService.saveFontSize(selecionado);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Tamanho da fonte: ${selecionado}pt'),
+        backgroundColor: const Color(0xFF1E3A8A),
+      ),
+    );
   }
 
   Future<void> _confirmarLogout() async {
@@ -479,6 +407,7 @@ class _PerfilPageState extends State<PerfilPage> {
     required String subtitulo,
     required VoidCallback? onTap,
     Color corIcone = const Color(0xFF1E3A8A),
+    bool? expanded,
   }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -494,8 +423,7 @@ class _PerfilPageState extends State<PerfilPage> {
         ],
       ),
       child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         leading: Container(
           width: 46,
           height: 46,
@@ -512,9 +440,13 @@ class _PerfilPageState extends State<PerfilPage> {
           ),
         ),
         subtitle: Text(subtitulo),
-        trailing: const Icon(
-          Icons.arrow_forward_ios,
-          size: 16,
+        trailing: Icon(
+          expanded == null
+              ? Icons.arrow_forward_ios
+              : (expanded
+                  ? Icons.keyboard_arrow_down
+                  : Icons.arrow_forward_ios),
+          size: expanded == null ? 16 : 22,
         ),
         onTap: onTap,
       ),
@@ -559,23 +491,18 @@ class _PerfilPageState extends State<PerfilPage> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
-      stream: _firestore
-          .collection('users')
-          .doc(widget.userId)
-          .snapshots(),
+      stream: _firestore.collection('users').doc(widget.userId).snapshots(),
       builder: (context, snapshot) {
         final rawData = snapshot.data?.data();
 
-        final userData = rawData is Map<String, dynamic>
-            ? rawData
-            : <String, dynamic>{};
+        final userData =
+            rawData is Map<String, dynamic> ? rawData : <String, dynamic>{};
 
         final nome = (userData['nome'] ?? '').toString();
         final telefone = (userData['telefone'] ?? '').toString();
         final cidade = (userData['cidade'] ?? '').toString();
         final email =
-            (_auth.currentUser?.email ?? userData['email'] ?? '')
-                .toString();
+            (_auth.currentUser?.email ?? userData['email'] ?? '').toString();
 
         _nomeController.text = nome;
         _telefoneController.text = telefone;
@@ -588,8 +515,7 @@ class _PerfilPageState extends State<PerfilPage> {
               children: [
                 Container(
                   width: double.infinity,
-                  padding:
-                      const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
@@ -650,9 +576,7 @@ class _PerfilPageState extends State<PerfilPage> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        email.isNotEmpty
-                            ? email
-                            : 'Email não disponível',
+                        email.isNotEmpty ? email : 'Email não disponível',
                         style: const TextStyle(
                           color: Color(0xFFE0E7FF),
                         ),
@@ -681,48 +605,58 @@ class _PerfilPageState extends State<PerfilPage> {
                       ),
                       const SizedBox(height: 8),
                       ElevatedButton(
-                        onPressed:
-                            _salvando ? null : _salvarPerfil,
+                        onPressed: _salvando ? null : _salvarPerfil,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              const Color(0xFF1E3A8A),
+                          backgroundColor: const Color(0xFF1E3A8A),
                           foregroundColor: Colors.white,
-                          padding:
-                              const EdgeInsets.symmetric(
+                          padding: const EdgeInsets.symmetric(
                             vertical: 16,
                           ),
                         ),
                         child: Text(
-                          _salvando
-                              ? 'Salvando...'
-                              : 'Salvar alterações',
+                          _salvando ? 'Salvando...' : 'Salvar alterações',
                         ),
                       ),
                       const SizedBox(height: 24),
                       _buildAcaoTile(
+                        icon: Icons.workspace_premium,
+                        titulo: 'Planos',
+                        subtitulo: 'Compare Gratuito e Premium',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const PlansPage()),
+                        ),
+                        corIcone: const Color(0xFFD97706),
+                      ),
+                      _buildAcaoTile(
+                        icon: Icons.card_membership,
+                        titulo: 'Minha Assinatura',
+                        subtitulo: 'Plano, status e validade',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const MySubscriptionPage(),
+                          ),
+                        ),
+                        corIcone: const Color(0xFF1E3A8A),
+                      ),
+                      _buildAcaoTile(
                         icon: Icons.lock_reset,
                         titulo: 'Trocar senha',
-                        subtitulo:
-                            'Enviar link para seu e-mail',
+                        subtitulo: 'Enviar link para seu e-mail',
                         onTap: _enviarRedefinicaoSenha,
                       ),
                       _buildAcaoTile(
                         icon: Icons.support_agent,
                         titulo: 'Falar com suporte',
-                        subtitulo:
-                            'Relatar problema, dúvida ou sugestão',
+                        subtitulo: 'Relatar problema, dúvida ou sugestão',
                         onTap: _abrirDialogoSuporte,
-                        corIcone:
-                            const Color(0xFF0F766E),
+                        corIcone: const Color(0xFF0F766E),
                       ),
                       _buildAcaoTile(
                         icon: Icons.info_outline,
                         titulo: 'Sobre o app',
-                        subtitulo:
-                            'Informações do aplicativo',
+                        subtitulo: 'Informações do aplicativo',
                         onTap: _abrirSobreApp,
-                        corIcone:
-                            const Color(0xFF7C3AED),
+                        corIcone: const Color(0xFF7C3AED),
                       ),
                       const SizedBox(height: 24),
                       const Text(
@@ -735,13 +669,38 @@ class _PerfilPageState extends State<PerfilPage> {
                       ),
                       const SizedBox(height: 16),
                       _buildAcaoTile(
-                        icon: Icons.brightness_6,
-                        titulo: 'Modo escuro / claro',
-                        subtitulo:
-                            'Manual ou automático: ${_themeModeLabels[_themeModeIndex]}',
-                        onTap: _abrirDialogoTema,
-                        corIcone: const Color(0xFF1F2937),
+                        icon: Icons.privacy_tip_outlined,
+                        titulo: 'Privacidade e dados',
+                        subtitulo: 'Política, termos, exportação e exclusão',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                PrivacyCenterPage(userId: widget.userId),
+                          ),
+                        ),
+                        corIcone: const Color(0xFF1E3A8A),
                       ),
+                      _buildAcaoTile(
+                        icon: Icons.description_outlined,
+                        titulo: 'Política de Privacidade',
+                        subtitulo: 'Versão vigente',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const PrivacyPolicyPage(),
+                          ),
+                        ),
+                      ),
+                      _buildAcaoTile(
+                        icon: Icons.gavel_outlined,
+                        titulo: 'Termos de Uso',
+                        subtitulo: 'Versão vigente',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const TermsOfUsePage(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       _buildAcaoTile(
                         icon: Icons.text_fields,
                         titulo: 'Tamanho da fonte',
@@ -750,10 +709,28 @@ class _PerfilPageState extends State<PerfilPage> {
                         corIcone: const Color(0xFF4B5563),
                       ),
                       _buildAcaoTile(
+                        icon: Icons.notifications_outlined,
+                        titulo: 'Editar notificações',
+                        subtitulo: 'Escolha quais alertas receber no celular',
+                        expanded: _showNotificacoesConfig,
+                        onTap: () => setState(() {
+                          _showNotificacoesConfig = !_showNotificacoesConfig;
+                        }),
+                        corIcone: const Color(0xFF0F766E),
+                      ),
+                      if (_showNotificacoesConfig) ...[
+                        const SizedBox(height: 16),
+                        NotificationPreferencesSection(
+                          userId: widget.userId,
+                          embedded: true,
+                        ),
+                      ],
+                      _buildAcaoTile(
                         icon: Icons.access_time,
                         titulo: 'Relógio',
                         subtitulo:
                             'Ajustar tempo e opções de relógio flutuante',
+                        expanded: _showRelogioConfig,
                         onTap: () => setState(() {
                           _showRelogioConfig = !_showRelogioConfig;
                         }),
@@ -780,7 +757,8 @@ class _PerfilPageState extends State<PerfilPage> {
                               SwitchListTile(
                                 title: const Text('Ativar lembrete de pausa'),
                                 value: _enablePauseReminder,
-                                onChanged: (value) => setState(() => _enablePauseReminder = value),
+                                onChanged: (value) => setState(
+                                    () => _enablePauseReminder = value),
                               ),
                               ListTile(
                                 title: const Text('Tempo de estudo'),
@@ -793,7 +771,8 @@ class _PerfilPageState extends State<PerfilPage> {
                                       child: Text('$value min'),
                                     );
                                   }).toList(),
-                                  onChanged: (value) => setState(() => _studyDuration = value!),
+                                  onChanged: (value) =>
+                                      setState(() => _studyDuration = value!),
                                 ),
                               ),
                               ListTile(
@@ -807,18 +786,21 @@ class _PerfilPageState extends State<PerfilPage> {
                                       child: Text('$value min'),
                                     );
                                   }).toList(),
-                                  onChanged: (value) => setState(() => _pauseDuration = value!),
+                                  onChanged: (value) =>
+                                      setState(() => _pauseDuration = value!),
                                 ),
                               ),
                               SwitchListTile(
                                 title: const Text('Ativar som'),
                                 value: _enableSound,
-                                onChanged: (value) => setState(() => _enableSound = value),
+                                onChanged: (value) =>
+                                    setState(() => _enableSound = value),
                               ),
                               SwitchListTile(
                                 title: const Text('Mostrar relógio flutuante'),
                                 value: _showFloatingClock,
-                                onChanged: (value) => setState(() => _showFloatingClock = value),
+                                onChanged: (value) =>
+                                    setState(() => _showFloatingClock = value),
                               ),
                               const SizedBox(height: 16),
                               ElevatedButton(
@@ -826,9 +808,11 @@ class _PerfilPageState extends State<PerfilPage> {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFF1E3A8A),
                                   foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 16),
                                 ),
-                                child: const Text('Salvar configurações do relógio'),
+                                child: const Text(
+                                    'Salvar configurações do relógio'),
                               ),
                             ],
                           ),
@@ -838,10 +822,8 @@ class _PerfilPageState extends State<PerfilPage> {
                       OutlinedButton.icon(
                         onPressed: _confirmarLogout,
                         icon: const Icon(Icons.logout),
-                        label:
-                            const Text('Sair da conta'),
-                        style:
-                            OutlinedButton.styleFrom(
+                        label: const Text('Sair da conta'),
+                        style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.red,
                           side: const BorderSide(
                             color: Colors.red,

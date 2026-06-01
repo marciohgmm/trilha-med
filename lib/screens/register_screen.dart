@@ -1,5 +1,12 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+
+import '../services/auth/user_profile_service.dart';
+import '../services/analytics/app_analytics_service.dart';
+import '../services/legal/legal_acceptance_service.dart';
+import 'legal/privacy_policy_page.dart';
+import 'legal/terms_of_use_page.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -16,6 +23,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool carregando = false;
   bool mostrarSenha = false;
   bool mostrarConfirmarSenha = false;
+  bool _acceptedLegal = false;
 
   InputDecoration _decoracaoCampo({
     required String label,
@@ -75,6 +83,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
+    if (!_acceptedLegal) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Aceite a Política de Privacidade e os Termos de Uso.'),
+        ),
+      );
+      return;
+    }
+
     FocusScope.of(context).unfocus();
 
     setState(() {
@@ -90,8 +107,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       final user = userCredential.user;
 
-      if (user != null && !user.emailVerified) {
-        await user.sendEmailVerification();
+      if (user != null) {
+        await UserProfileService().ensureUserDocument(user: user);
+        await LegalAcceptanceService().recordAcceptance(userId: user.uid);
+        await AppAnalyticsService.instance.logSignUp(userId: user.uid);
+        if (!user.emailVerified) {
+          await user.sendEmailVerification();
+        }
       }
 
       await FirebaseAuth.instance.signOut();
@@ -245,8 +267,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           suffixIcon: IconButton(
                             onPressed: () {
                               setState(() {
-                                mostrarConfirmarSenha =
-                                    !mostrarConfirmarSenha;
+                                mostrarConfirmarSenha = !mostrarConfirmarSenha;
                               });
                             },
                             icon: Icon(
@@ -257,7 +278,53 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 16),
+                      CheckboxListTile(
+                        value: _acceptedLegal,
+                        onChanged: carregando
+                            ? null
+                            : (v) => setState(() => _acceptedLegal = v ?? false),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text.rich(
+                          TextSpan(
+                            style: const TextStyle(fontSize: 13),
+                            children: [
+                              const TextSpan(text: 'Li e aceito a '),
+                              TextSpan(
+                                text: 'Política de Privacidade',
+                                style: const TextStyle(
+                                  color: Color(0xFF1E3A8A),
+                                  decoration: TextDecoration.underline,
+                                ),
+                                recognizer: TapGestureRecognizer()
+                                  ..onTap = () => Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              const PrivacyPolicyPage(),
+                                        ),
+                                      ),
+                              ),
+                              const TextSpan(text: ' e os '),
+                              TextSpan(
+                                text: 'Termos de Uso',
+                                style: const TextStyle(
+                                  color: Color(0xFF1E3A8A),
+                                  decoration: TextDecoration.underline,
+                                ),
+                                recognizer: TapGestureRecognizer()
+                                  ..onTap = () => Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => const TermsOfUsePage(),
+                                        ),
+                                      ),
+                              ),
+                              const TextSpan(text: '.'),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(

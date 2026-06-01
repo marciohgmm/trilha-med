@@ -82,8 +82,8 @@ class QuestaoModel {
     return QuestaoModel(
       id: id,
       temaId: map['temaId']?.toString() ?? '',
-      temaSlug: map['temaSlug']?.toString() ??
-          slugify(map['tema']?.toString() ?? ''),
+      temaSlug:
+          map['temaSlug']?.toString() ?? slugify(map['tema']?.toString() ?? ''),
       materiaId: map['materiaId']?.toString() ?? '',
       materia: map['materia']?.toString() ?? '',
       tema: map['tema']?.toString() ?? '',
@@ -106,22 +106,29 @@ class QuestaoModel {
       explicacoesErradas: explicacoesErradasRaw is Map
           ? Map<String, String>.fromEntries(
               explicacoesErradasRaw.entries.map(
-                (entry) => MapEntry(entry.key.toString(), entry.value?.toString() ?? ''),
+                (entry) => MapEntry(
+                    entry.key.toString(), entry.value?.toString() ?? ''),
               ),
             )
           : <String, String>{},
       justificativasPorAlternativa: justificativasRaw is Map
           ? Map<String, String>.fromEntries(
               justificativasRaw.entries.map(
-                (entry) => MapEntry(entry.key.toString(), entry.value?.toString() ?? ''),
+                (entry) => MapEntry(
+                    entry.key.toString(), entry.value?.toString() ?? ''),
               ),
             )
           : <String, String>{},
       dificuldade: map['dificuldade']?.toString() ?? 'médio',
       status: map['status']?.toString() ??
-          ((map['ativo'] is bool && map['ativo'] == false) ? 'inativo' : 'ativo'),
+          ((map['ativo'] is bool && map['ativo'] == false)
+              ? 'inativo'
+              : 'ativo'),
       tags: tagsRaw is List
-          ? tagsRaw.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList()
+          ? tagsRaw
+              .map((e) => e.toString())
+              .where((e) => e.trim().isNotEmpty)
+              .toList()
           : <String>[],
       ativo: map['ativo'] is bool ? map['ativo'] as bool : true,
       createdAt: _parseTimestamp(map['createdAt']) ?? DateTime.now(),
@@ -154,6 +161,16 @@ class QuestaoModel {
       'updatedAt': Timestamp.fromDate(updatedAt),
       'ordem': ordem,
     };
+  }
+
+  /// Questões visíveis na lista de estudo (exclui rascunho/inativo explícitos).
+  bool get disponivelParaEstudo {
+    if (!ativo) return false;
+    final s = status.trim().toLowerCase();
+    if (s == 'inativo' || s == 'rascunho' || s == 'arquivado') {
+      return false;
+    }
+    return true;
   }
 
   QuestaoAlternativa? get alternativaCorreta {

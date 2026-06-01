@@ -80,7 +80,10 @@ class _CriarCronogramaPageState extends State<CriarCronogramaPage> {
 
     try {
       if (temCronogramaExistente) {
-        await service.salvarDataProva(
+        // Ao trocar a data da prova, reinicia todo o cronograma (meta + itens + revisões)
+        // e recria em ordem aleatória.
+        await service.excluirCronograma(widget.userId);
+        await service.criarCronogramaInicial(
           userId: widget.userId,
           dataProva: dataProva!,
         );
@@ -88,7 +91,7 @@ class _CriarCronogramaPageState extends State<CriarCronogramaPage> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("Data da prova atualizada!"),
+            content: Text("Cronograma reiniciado com a nova data da prova!"),
             backgroundColor: Colors.green,
           ),
         );

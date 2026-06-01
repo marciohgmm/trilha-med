@@ -41,4 +41,3 @@ class CredenciaisSalvasService {
     await _storage.delete(key: _kSenhaKey);
   }
 }
-

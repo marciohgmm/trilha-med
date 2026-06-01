@@ -1,21 +1,27 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-import 'temas_page.dart';
+import '../core/feature_flags/feature_modules.dart';
+import '../widgets/feature_flags/feature_gate.dart';
+import 'subtemas_page.dart';
+import '../models/flashcard_materia_stat.dart';
+import '../services/questao_materia_stats_service.dart';
 import '../services/study_timer_service.dart';
+import '../widgets/study_pause_dialog.dart';
 import '../widgets/study_timer_overlay.dart';
 import 'estatisticas_questoes_page.dart';
+import 'login_page.dart';
+import 'simulado/simulado_filtros_page.dart';
+import 'simulado/simulado_historico_page.dart';
 
 class QuestoesPorTemaPage extends StatefulWidget {
   final String userId;
   final String? materia;
-  final String? tema;
 
   const QuestoesPorTemaPage({
     super.key,
     required this.userId,
     this.materia,
-    this.tema,
   });
 
   @override
@@ -27,9 +33,20 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
+  Future<void> _fazerLogout() async {
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (route) => false,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+    QuestaoMateriaStatsService.instance.ensureSeededIfEmpty();
     _timerService.loadSettings().then((_) {
       _timerService.iniciarEstudo();
     });
@@ -48,66 +65,42 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
     super.dispose();
   }
 
+  void _iniciarPausaComDialogo() {
+    _timerService.pausarEstudo();
+    _timerService.iniciarPausa();
+    StudyPauseDialog.show(context, _timerService);
+  }
+
   void _mostrarAlertaPausa() {
+    final min = _timerService.studyDuration.inMinutes;
+    final pauseMin = _timerService.pauseDuration.inMinutes;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('⏱️ Você estudou por 50 minutos. Faça uma pausa de 10 minutos.'),
-        duration: const Duration(seconds: 10),
+        content: Text(
+          '⏱️ Você estudou $min min. Hora de uma pausa de $pauseMin min.',
+        ),
+        duration: const Duration(seconds: 12),
         action: SnackBarAction(
           label: 'Pausar agora',
-          onPressed: () {
-            _timerService.pausarEstudo();
-            _timerService.iniciarPausa();
-            _mostrarCronometroPausa();
-          },
+          onPressed: _iniciarPausaComDialogo,
         ),
       ),
     );
   }
 
-  void _mostrarCronometroPausa() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => StreamBuilder<Duration>(
-        stream: _timerService.pauseTimeStream,
-        builder: (context, snapshot) {
-          final remaining = snapshot.data ?? _timerService.pauseTime;
-          final minutes = remaining.inMinutes;
-          final seconds = remaining.inSeconds % 60;
-
-          return AlertDialog(
-            title: const Text('Pausa em andamento'),
-            content: Text(
-              'Tempo restante: ${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}',
-              style: const TextStyle(fontSize: 24),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  _timerService.cancelarPausa();
-                  Navigator.of(context).pop();
-                  _timerService.iniciarEstudo();
-                },
-                child: const Text('Voltar a estudar'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
   void _mostrarFimPausa() {
-    Navigator.of(context).pop(); // Fechar dialog de pausa
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('⏱️ Pausa finalizada. Hora de voltar aos estudos!'),
+        content: const Text(
+          '⏰ Pausa finalizada! O despertador tocou — volte aos estudos.',
+        ),
+        duration: const Duration(seconds: 12),
         action: SnackBarAction(
           label: 'Voltar a estudar',
-          onPressed: () {
-            _timerService.iniciarEstudo();
-          },
+          onPressed: () => _timerService.retomarEstudoAposPausa(),
         ),
       ),
     );
@@ -118,22 +111,40 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4F8),
       appBar: AppBar(
-        title: const Text('Questões por Tema'),
+        title: const Text('Questões por Matéria'),
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
         centerTitle: true,
         actions: [
+          IconButton(
+            tooltip: 'Histórico de simulados',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SimuladoHistoricoPage(userId: widget.userId),
+                ),
+              );
+            },
+            icon: const Icon(Icons.history_edu),
+          ),
           IconButton(
             tooltip: 'Estatísticas',
             onPressed: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => EstatisticasQuestoesPage(userId: widget.userId),
+                  builder: (_) =>
+                      EstatisticasQuestoesPage(userId: widget.userId),
                 ),
               );
             },
             icon: const Icon(Icons.bar_chart),
+          ),
+          IconButton(
+            onPressed: _fazerLogout,
+            icon: const Icon(Icons.logout),
+            tooltip: 'Sair',
           ),
         ],
       ),
@@ -146,7 +157,7 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Questões por tema',
+                    'Questões por matéria',
                     style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
@@ -155,8 +166,48 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Escolha uma matéria para iniciar as questões.',
+                    'Escolha uma matéria ou faça um simulado personalizado.',
                     style: TextStyle(fontSize: 16, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 16),
+                  FeatureGate(
+                    moduleId: FeatureModules.simulados,
+                    onEnabled: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => SimuladoFiltrosPage(
+                            userId: widget.userId,
+                          ),
+                          fullscreenDialog: true,
+                        ),
+                      );
+                    },
+                    childBuilder: (onPressed) => SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: onPressed,
+                        icon: const Icon(Icons.assignment, size: 24),
+                        label: const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          child: Text(
+                            'Fazer Simulado',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF0D9488),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          elevation: 4,
+                        ),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 20),
                   Expanded(
@@ -183,10 +234,9 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
                           ),
                         ),
                         Expanded(
-                          child: StreamBuilder<QuerySnapshot>(
-                            stream: FirebaseFirestore.instance
-                                .collection('questoes')
-                                .snapshots(),
+                          child: StreamBuilder<List<FlashcardMateriaStat>>(
+                            stream: QuestaoMateriaStatsService.instance
+                                .watchMateriaStats(),
                             builder: (context, snapshot) {
                               if (snapshot.hasError) {
                                 return Center(
@@ -200,24 +250,17 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
                                 );
                               }
                               if (!snapshot.hasData) {
-                                return const Center(child: CircularProgressIndicator());
+                                return const Center(
+                                    child: CircularProgressIndicator());
                               }
 
-                              final docs = snapshot.data!.docs;
-                              final materias = <String, int>{};
-
-                              for (final doc in docs) {
-                                final data = doc.data() as Map<String, dynamic>;
-                                final materia = (data['materia'] ?? '').toString().trim();
-                                if (materia.isNotEmpty) {
-                                  materias[materia] = (materias[materia] ?? 0) + 1;
-                                }
-                              }
-
-                              final filteredMaterias = materias.keys
-                                  .where((materia) => materia.toLowerCase().contains(_searchQuery))
+                              final stats = snapshot.data!;
+                              final filteredMaterias = stats
+                                  .where((s) => s.name
+                                      .toLowerCase()
+                                      .contains(_searchQuery))
                                   .toList()
-                                ..sort();
+                                ..sort((a, b) => a.name.compareTo(b.name));
 
                               if (filteredMaterias.isEmpty) {
                                 return const Center(
@@ -231,8 +274,9 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
                               return ListView.builder(
                                 itemCount: filteredMaterias.length,
                                 itemBuilder: (context, index) {
-                                  final materia = filteredMaterias[index];
-                                  final count = materias[materia] ?? 0;
+                                  final stat = filteredMaterias[index];
+                                  final materia = stat.name;
+                                  final count = stat.total;
 
                                   return Card(
                                     margin: const EdgeInsets.only(bottom: 8),
@@ -244,8 +288,10 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
                                         width: 40,
                                         height: 40,
                                         decoration: const BoxDecoration(
-                                          color: Color(0x1A1E3A8A), // 0xFF1E3A8A with 10% alpha
-                                          borderRadius: BorderRadius.all(Radius.circular(8)),
+                                          color: Color(
+                                              0x1A1E3A8A), // 0xFF1E3A8A with 10% alpha
+                                          borderRadius: BorderRadius.all(
+                                              Radius.circular(8)),
                                         ),
                                         child: const Icon(
                                           Icons.school,
@@ -259,12 +305,14 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
                                         ),
                                       ),
                                       subtitle: Text('$count questões'),
-                                      trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                                      trailing: const Icon(
+                                          Icons.arrow_forward_ios,
+                                          size: 16),
                                       onTap: () {
                                         Navigator.push(
                                           context,
                                           MaterialPageRoute(
-                                            builder: (_) => TemasPage(
+                                            builder: (_) => SubtemasPage(
                                               userId: widget.userId,
                                               materia: materia,
                                               collectionName: 'questoes',

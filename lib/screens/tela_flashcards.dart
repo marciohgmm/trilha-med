@@ -1,26 +1,35 @@
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/gestures.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_application_1/core/constants/content_query_limits.dart';
+
+import 'package:flutter_application_1/utils/image_helper.dart';
+import 'package:flutter_application_1/utils/report_message_dialog.dart';
+import 'package:flutter_application_1/widgets/flashcard_readonly_quill.dart';
+
+import 'package:flutter_application_1/services/flashcard_study_daily_store.dart';
+import 'package:flutter_application_1/utils/flashcard_study_order.dart';
 
 import 'cronograma_page.dart';
 import 'questoes_page.dart';
 import '../services/study_timer_service.dart';
+import '../core/analytics/analytics_events.dart';
+import '../core/analytics/analytics_feature_tracker.dart';
+import '../widgets/study_pause_dialog.dart';
 import '../widgets/study_timer_overlay.dart';
 
 class TelaFlashcards extends StatefulWidget {
   final String userId;
   final String materia;
-  final String tema;
   final String subtema;
 
   const TelaFlashcards({
     super.key,
     required this.userId,
     required this.materia,
-    required this.tema,
     required this.subtema,
   });
 
@@ -28,8 +37,25 @@ class TelaFlashcards extends StatefulWidget {
   State<TelaFlashcards> createState() => _TelaFlashcardsState();
 }
 
-class _TelaFlashcardsState extends State<TelaFlashcards> {
-  int indiceAtual = 0;
+class _TelaFlashcardsState extends State<TelaFlashcards> with WidgetsBindingObserver, AnalyticsFeatureTracker {
+  // Sessão (fila dinâmica)
+  bool _sessaoIniciada = false;
+  String? _cardAtualId;
+  final List<String> _fila = [];
+  final List<_CardRetorno> _retornos = [];
+  final Map<String, int> _aparicoes = {};
+  final Set<String> _vistosAoMenosUmaVez = {};
+  final Set<String> _marcadosFaceis = {};
+  int _totalCardsSessao = 0;
+  bool _sessaoEsgotada = false;
+
+  /// Preferências locais (carregadas antes de montar a sessão).
+  bool _prefsReady = false;
+  FlashcardStudySessionSnapshot? _snapshotCarregado;
+
+  /// Dia civil local em que a sessão atual foi registrada (troca à meia-noite → reinicia).
+  String? _diaSessaoRegistrado;
+
   bool mostrandoResposta = false;
   bool salvando = false;
   bool enviandoReport = false;
@@ -37,6 +63,10 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
   bool _assuntoConcluido = false;
 
   final StudyTimerService _timerService = StudyTimerService();
+
+  /// Rede indisponível (Connectivity) — aviso amigável; dados de cards podem vir do cache Firestore.
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  bool _netOffline = false;
 
   Future<String> _carregarNomeAluno() async {
     try {
@@ -55,7 +85,38 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
   @override
   void initState() {
     super.initState();
-    debugPrint('TelaFlashcards init: userId=${widget.userId}, materia=${widget.materia}, tema=${widget.tema}, subtema=${widget.subtema}');
+    trackFeatureOnce(
+      AnalyticsEvents.flashcardStudyStart,
+      userId: widget.userId,
+      parameters: {AnalyticsParams.materia: widget.materia},
+    );
+    WidgetsBinding.instance.addObserver(this);
+    FlashcardStudyDailyStore.load(
+      userId: widget.userId,
+      materia: widget.materia,
+      subtema: widget.subtema,
+    ).then((snap) {
+      if (!mounted) return;
+      setState(() {
+        _snapshotCarregado = snap;
+        _prefsReady = true;
+      });
+    });
+    _connectivitySub =
+        Connectivity().onConnectivityChanged.listen((results) {
+      if (!mounted) return;
+      final offline = results.isEmpty ||
+          results.every((r) => r == ConnectivityResult.none);
+      setState(() => _netOffline = offline);
+    });
+    Connectivity().checkConnectivity().then((results) {
+      if (!mounted) return;
+      final offline = results.isEmpty ||
+          results.every((r) => r == ConnectivityResult.none);
+      setState(() => _netOffline = offline);
+    });
+    debugPrint(
+        'TelaFlashcards init: userId=${widget.userId}, materia=${widget.materia}, subtema=${widget.subtema}');
     _timerService.loadSettings().then((_) {
       _timerService.iniciarEstudo();
     });
@@ -70,70 +131,199 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
 
   @override
   void dispose() {
+    _connectivitySub?.cancel();
     _timerService.pausarEstudo();
+    WidgetsBinding.instance.removeObserver(this);
+    _salvarSnapshotFireAndForget();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _salvarSnapshotFireAndForget();
+    }
+  }
+
+  void _salvarSnapshotFireAndForget() {
+    if (!_prefsReady || !_sessaoIniciada || _assuntoConcluido) return;
+    final snap = FlashcardStudySessionSnapshot(
+      dateYmd: FlashcardStudyDailyStore.todayYmdLocal(),
+      materia: widget.materia,
+      subtema: widget.subtema,
+      marcadosFaceis: _marcadosFaceis.toList(),
+      fila: List<String>.from(_fila),
+      retornos: _retornos
+          .map(
+            (r) => FlashcardRetornoSnapshot(cardId: r.cardId, faltam: r.faltam),
+          )
+          .toList(),
+      cardAtualId: _cardAtualId,
+      aparicoes: Map<String, int>.from(_aparicoes),
+      vistos: _vistosAoMenosUmaVez.toList(),
+      totalCardsSessao: _totalCardsSessao,
+      assuntoConcluido: _assuntoConcluido,
+      sessaoEsgotada: _sessaoEsgotada,
+    );
+    FlashcardStudyDailyStore.save(
+      userId: widget.userId,
+      materia: widget.materia,
+      subtema: widget.subtema,
+      snapshot: snap,
+    );
+  }
+
+  /// Zera só o estado em memória da sessão (fila, fáceis, etc.).
+  void _resetarEstadoSessaoEstudo() {
+    _sessaoIniciada = false;
+    _marcadosFaceis.clear();
+    _fila.clear();
+    _retornos.clear();
+    _aparicoes.clear();
+    _vistosAoMenosUmaVez.clear();
+    _cardAtualId = null;
+    _totalCardsSessao = 0;
+    _sessaoEsgotada = false;
+    _assuntoConcluido = false;
+    mostrandoResposta = false;
+    _mostrarExplicacao = false;
+  }
+
+  void _reiniciarSessaoPorTrocaDeDia() {
+    _snapshotCarregado = null;
+    _resetarEstadoSessaoEstudo();
+    FlashcardStudyDailyStore.clear(
+      userId: widget.userId,
+      materia: widget.materia,
+      subtema: widget.subtema,
+    );
+  }
+
+  Future<void> _confirmarELimparCacheSessaoDoDia() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Limpar progresso da sessão?'),
+        content: const Text(
+          'Apaga neste aparelho o progresso da sessão de hoje para este subtema '
+          '(fila, retornos e cards já marcados como Fácil na sessão). '
+          'O histórico no Firebase (nível de revisão) não é apagado.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E3A8A),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Limpar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    await FlashcardStudyDailyStore.clear(
+      userId: widget.userId,
+      materia: widget.materia,
+      subtema: widget.subtema,
+    );
+    if (!mounted) return;
+    setState(_resetarEstadoSessaoEstudo);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Progresso da sessão de hoje limpo. Estudo recomeça do zero.'),
+        backgroundColor: Color(0xFF1E3A8A),
+      ),
+    );
+  }
+
+  void _restaurarDeSnapshot(
+    FlashcardStudySessionSnapshot snap,
+    Set<String> idsSet,
+  ) {
+    _marcadosFaceis
+      ..clear()
+      ..addAll(snap.marcadosFaceis.where(idsSet.contains));
+    _fila
+      ..clear()
+      ..addAll(snap.fila.where(idsSet.contains));
+    _retornos.clear();
+    for (final r in snap.retornos) {
+      if (idsSet.contains(r.cardId) && r.faltam > 0) {
+        _retornos.add(_CardRetorno(cardId: r.cardId, faltam: r.faltam));
+      }
+    }
+    _aparicoes.clear();
+    snap.aparicoes.forEach((k, v) {
+      if (idsSet.contains(k)) {
+        _aparicoes[k] = v;
+      }
+    });
+    _vistosAoMenosUmaVez
+      ..clear()
+      ..addAll(snap.vistos.where(idsSet.contains));
+    _assuntoConcluido = snap.assuntoConcluido;
+    _sessaoEsgotada = snap.sessaoEsgotada;
+    final cid = snap.cardAtualId;
+    if (cid != null &&
+        idsSet.contains(cid) &&
+        !_marcadosFaceis.contains(cid)) {
+      _cardAtualId = cid;
+    } else {
+      _cardAtualId = null;
+    }
+    if (!_assuntoConcluido && _cardAtualId == null) {
+      if (_fila.isNotEmpty) {
+        _cardAtualId = _fila.removeAt(0);
+      } else {
+        _avancarParaProximoCard();
+      }
+    }
+  }
+
+  void _iniciarPausaComDialogo() {
+    _timerService.pausarEstudo();
+    _timerService.iniciarPausa();
+    StudyPauseDialog.show(context, _timerService);
+  }
+
   void _mostrarAlertaPausa() {
+    final min = _timerService.studyDuration.inMinutes;
+    final pauseMin = _timerService.pauseDuration.inMinutes;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('⏱️ Você estudou por 50 minutos. Faça uma pausa de 10 minutos.'),
-        duration: const Duration(seconds: 10),
+        content: Text(
+          '⏱️ Você estudou $min min. Hora de uma pausa de $pauseMin min.',
+        ),
+        duration: const Duration(seconds: 12),
         action: SnackBarAction(
           label: 'Pausar agora',
-          onPressed: () {
-            _timerService.pausarEstudo();
-            _timerService.iniciarPausa();
-            _mostrarCronometroPausa();
-          },
+          onPressed: _iniciarPausaComDialogo,
         ),
       ),
     );
   }
 
-  void _mostrarCronometroPausa() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => StreamBuilder<Duration>(
-        stream: _timerService.pauseTimeStream,
-        builder: (context, snapshot) {
-          final remaining = snapshot.data ?? _timerService.pauseTime;
-          final minutes = remaining.inMinutes;
-          final seconds = remaining.inSeconds % 60;
-
-          return AlertDialog(
-            title: const Text('Pausa em andamento'),
-            content: Text(
-              'Tempo restante: ${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}',
-              style: const TextStyle(fontSize: 24),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  _timerService.cancelarPausa();
-                  Navigator.of(context).pop();
-                  _timerService.iniciarEstudo();
-                },
-                child: const Text('Voltar a estudar'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
   void _mostrarFimPausa() {
-    Navigator.of(context).pop(); // Fechar dialog de pausa
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('⏱️ Pausa finalizada. Hora de voltar aos estudos!'),
+        content: const Text(
+          '⏰ Pausa finalizada! O despertador tocou — volte aos estudos.',
+        ),
+        duration: const Duration(seconds: 12),
         action: SnackBarAction(
           label: 'Voltar a estudar',
-          onPressed: () {
-            _timerService.iniciarEstudo();
-          },
+          onPressed: () => _timerService.retomarEstudoAposPausa(),
         ),
       ),
     );
@@ -161,235 +351,222 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
     return texto;
   }
 
-  Color? _parseHexColor(String? value) {
-    if (value == null || value.isEmpty) return null;
-    final hex = value.replaceFirst('#', '');
-    if (hex.length == 6) {
-      return Color(int.parse('FF$hex', radix: 16));
-    }
-    if (hex.length == 8) {
-      return Color(int.parse(hex, radix: 16));
-    }
-    return null;
-  }
-
-  List<dynamic>? _tryDecodeDelta(dynamic valor) {
-    final texto = (valor ?? '').toString();
-    if (texto.trim().isEmpty) return null;
-
-    try {
-      final decoded = jsonDecode(texto);
-      if (decoded is List) return decoded;
-      if (decoded is Map && decoded['ops'] is List) {
-        return decoded['ops'] as List;
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  TextSpan _toSpanFromOp(Map op) {
-    final insert = op['insert']?.toString() ?? '';
-    final attrs = op['attributes'];
-    final atributos = attrs is Map ? attrs : const {};
-
-    final fontWeight = atributos['bold'] == true ? FontWeight.bold : FontWeight.w400;
-    final fontStyle = atributos['italic'] == true ? FontStyle.italic : FontStyle.normal;
-    final decorationParts = <TextDecoration>[];
-    if (atributos['underline'] == true) decorationParts.add(TextDecoration.underline);
-    if (atributos['strike'] == true) decorationParts.add(TextDecoration.lineThrough);
-    if (atributos['link'] != null) decorationParts.add(TextDecoration.underline);
-
-    final link = atributos['link']?.toString();
-    final textColor = link != null
-        ? const Color(0xFF1D4ED8)
-        : _parseHexColor(atributos['color']?.toString()) ?? Colors.black87;
-    final background = _parseHexColor(atributos['background']?.toString());
-
-    TapGestureRecognizer? recognizer;
-    if (link != null && link.isNotEmpty) {
-      recognizer = TapGestureRecognizer()
-        ..onTap = () async {
-          final uri = Uri.tryParse(link);
-          if (uri != null) {
-            await launchUrl(uri, mode: LaunchMode.platformDefault);
-          }
-        };
-    }
-
-    return TextSpan(
-      text: insert,
-      recognizer: recognizer,
+  Widget _conteudoRichCard({
+    required String cardId,
+    required dynamic valor,
+    required bool destaque,
+    required String materia,
+  }) {
+    return DefaultTextStyle.merge(
       style: TextStyle(
-        fontWeight: fontWeight,
-        fontStyle: fontStyle,
-        color: textColor,
-        backgroundColor: background,
-        decoration: decorationParts.isEmpty
-            ? TextDecoration.none
-            : TextDecoration.combine(decorationParts),
+        fontSize: 18.5,
+        height: 1.52,
+        color: const Color(0xFF1F2937),
+        fontWeight: destaque ? FontWeight.w600 : FontWeight.w500,
+      ),
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: FlashcardReadonlyQuill(
+          key: ValueKey('fc_study_$cardId'),
+          valor: valor,
+          materia: materia,
+          studyMode: true,
+        ),
       ),
     );
   }
 
-  Widget _buildConteudoFormatado({
-    required dynamic valor,
-    required bool destaquePergunta,
-  }) {
-    final delta = _tryDecodeDelta(valor);
-    if (delta == null) {
-      return Text(
-        _normalizarConteudoRichText(valor),
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 20,
-          height: 1.5,
-          color: Colors.black87,
-          fontWeight: destaquePergunta ? FontWeight.bold : FontWeight.w500,
-        ),
-      );
-    }
-
-    final widgets = <Widget>[];
-    final spans = <TextSpan>[];
-
-    void flushSpans() {
-      if (spans.isEmpty) return;
-      widgets.add(
-        RichText(
-          textAlign: TextAlign.center,
-          text: TextSpan(
-            style: TextStyle(
-              fontSize: 20,
-              height: 1.5,
-              color: Colors.black87,
-              fontWeight: destaquePergunta ? FontWeight.bold : FontWeight.w500,
-            ),
-            children: List<TextSpan>.from(spans),
-          ),
-        ),
-      );
-      spans.clear();
-    }
-
-    for (final raw in delta) {
-      if (raw is! Map) continue;
-      final op = Map<String, dynamic>.from(raw);
-      final insert = op['insert'];
-
-      if (insert is String) {
-        if (insert.isNotEmpty) spans.add(_toSpanFromOp(op));
-      } else if (insert is Map && insert['image'] != null) {
-        flushSpans();
-        final imageUrl = insert['image'].toString();
-        if (imageUrl.isNotEmpty) {
-          widgets.add(
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: _buildImagemUrl(imageUrl),
-            ),
-          );
-        }
-      }
-    }
-    flushSpans();
-
-    if (widgets.isEmpty) {
-      return Text(
-        _normalizarConteudoRichText(valor),
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 20,
-          height: 1.5,
-          color: Colors.black87,
-          fontWeight: destaquePergunta ? FontWeight.bold : FontWeight.w500,
-        ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: widgets,
-    );
+  int _metaFaceis(int total) {
+    // 50% arredondando para cima (ex.: 1->1, 3->2, 20->10)
+    return ((total * 0.5).ceil()).clamp(1, total);
   }
 
-  Widget _buildImagemUrl(String url) {
-    if (url.trim().isEmpty) return const SizedBox.shrink();
+  /// Quantos **outros** cards ver antes de repetir (após responder Difícil/Moderado).
+  static const int _intervaloOutrosCardsDificil = 3;
+  static const int _intervaloOutrosCardsModerado = 5;
 
-    // Em alguns casos pode ser salvo como gs://..., especialmente em migrações/imports.
-    if (url.startsWith('gs://')) {
-      return FutureBuilder<String>(
-        future: FirebaseStorage.instance.refFromURL(url).getDownloadURL(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Center(child: CircularProgressIndicator()),
-            );
-          }
-          return _buildImagemNetwork(snapshot.data!);
-        },
-      );
+  /// Máximo de vezes que o card aparece na sessão; na 4ª sai como Fácil.
+  static const int _maxAparicoesPorCardNaSessao = 4;
+
+  void _removerCardDaRotacao(String cardId) {
+    _fila.removeWhere((id) => id == cardId);
+    _retornos.removeWhere((r) => r.cardId == cardId);
+  }
+
+  /// Agenda retorno após [outrosCards] interações com **outros** cards.
+  /// O contador interno usa +1 porque [_tickRetornosEInserirNaFila] roda já no
+  /// primeiro [_avancarParaProximoCard] logo após responder.
+  void _agendarRetorno(String cardId, int outrosCards) {
+    _removerCardDaRotacao(cardId);
+    _retornos.add(_CardRetorno(cardId: cardId, faltam: outrosCards + 1));
+  }
+
+  /// Decrementa contadores e recoloca no início da fila (próximo card a ver).
+  void _tickRetornosEInserirNaFila() {
+    if (_retornos.isEmpty) return;
+    for (final r in _retornos) {
+      r.faltam--;
     }
-
-    return _buildImagemNetwork(url);
+    final prontos = _retornos.where((r) => r.faltam <= 0).toList();
+    if (prontos.isEmpty) return;
+    _retornos.removeWhere((r) => r.faltam <= 0);
+    for (var i = prontos.length - 1; i >= 0; i--) {
+      final id = prontos[i].cardId;
+      if (_marcadosFaceis.contains(id)) continue;
+      _fila.removeWhere((x) => x == id);
+      _fila.insert(0, id);
+    }
   }
 
-  Widget _buildImagemNetwork(String url) {
-    return Image.network(
-      url,
-      height: 180,
-      fit: BoxFit.contain,
-      loadingBuilder: (context, child, progress) {
-        if (progress == null) return child;
-        final expected = progress.expectedTotalBytes;
-        final loaded = progress.cumulativeBytesLoaded;
-        final value = expected != null && expected > 0 ? loaded / expected : null;
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Center(
-            child: CircularProgressIndicator(value: value),
-          ),
-        );
-      },
-      errorBuilder: (context, error, stackTrace) {
-        debugPrint('Falha carregando imagem: $url -> $error');
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text(
-            'Imagem não carregada.\n$url\n$error',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.red),
-          ),
-        );
-      },
-    );
-  }
+  void _avancarParaProximoCard() {
+    _tickRetornosEInserirNaFila();
 
-  void proximoCard(int total) {
-    setState(() {
-      if (indiceAtual < total - 1) {
-        indiceAtual++;
-      } else {
-        // Ao concluir, mostramos a tela final (não popamos automaticamente).
-        _assuntoConcluido = true;
-      }
+    if (_fila.isNotEmpty) {
+      _cardAtualId = _fila.removeAt(0);
       mostrandoResposta = false;
       _mostrarExplicacao = false;
-    });
+      return;
+    }
+
+    // Sem mais cards para mostrar (sem fila e sem retornos)
+    _cardAtualId = null;
+    _sessaoEsgotada = true;
+    _assuntoConcluido = true;
+    FlashcardStudyDailyStore.clear(
+      userId: widget.userId,
+      materia: widget.materia,
+      subtema: widget.subtema,
+    );
   }
 
-  Future<void> salvarProgresso(String cardId, String dificuldade, int total) async {
+  void _iniciarOuSincronizarSessao(List<QueryDocumentSnapshot> docs) {
+    sortFlashcardDocsPorEstudo(docs);
+
+    final hoje = FlashcardStudyDailyStore.todayYmdLocal();
+    if (_diaSessaoRegistrado != null && _diaSessaoRegistrado != hoje) {
+      _reiniciarSessaoPorTrocaDeDia();
+    }
+    _diaSessaoRegistrado = hoje;
+
+    final ids = docs.map((d) => d.id).toList();
+    final idsSet = ids.toSet();
+
+    /// Remove da sessão cards que foram apagados no Firestore.
+    _marcadosFaceis.removeWhere((id) => !idsSet.contains(id));
+    _vistosAoMenosUmaVez.removeWhere((id) => !idsSet.contains(id));
+    _aparicoes.removeWhere((id, _) => !idsSet.contains(id));
+    _fila.removeWhere((id) => !idsSet.contains(id));
+    _retornos.removeWhere((r) => !idsSet.contains(r.cardId));
+
+    _totalCardsSessao = ids.length;
+
+    // Primeira inicialização: garante que todos apareçam ao menos 1x.
+    if (!_sessaoIniciada) {
+      _sessaoIniciada = true;
+
+      if (_snapshotCarregado != null &&
+          _snapshotCarregado!.dateYmd == hoje) {
+        _restaurarDeSnapshot(_snapshotCarregado!, idsSet);
+        _snapshotCarregado = null;
+        _totalCardsSessao = ids.length;
+        return;
+      }
+
+      _marcadosFaceis.clear();
+      _retornos.clear();
+      _aparicoes.clear();
+      _vistosAoMenosUmaVez.clear();
+      _fila
+        ..clear()
+        ..addAll(ids.where((id) => !_marcadosFaceis.contains(id)));
+
+      if (_fila.isNotEmpty) {
+        _cardAtualId = _fila.removeAt(0);
+      } else {
+        _cardAtualId = null;
+        _assuntoConcluido = true;
+      }
+      return;
+    }
+
+    // Se entrarem cards novos enquanto a sessão está aberta, adiciona ao fim da fila
+    // para garantir que sejam vistos ao menos 1x sem reiniciar tudo.
+    final conhecidos = <String>{
+      ..._aparicoes.keys,
+      ..._fila,
+      ..._retornos.map((r) => r.cardId),
+      if (_cardAtualId != null) _cardAtualId!,
+    };
+
+    final novos = ids
+        .where((id) =>
+            !conhecidos.contains(id) && !_marcadosFaceis.contains(id))
+        .toList();
+    if (novos.isNotEmpty) {
+      _fila.addAll(novos);
+    }
+
+    if (_cardAtualId != null && !idsSet.contains(_cardAtualId!)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {
+          _cardAtualId = null;
+          _avancarParaProximoCard();
+        });
+      });
+    }
+  }
+
+  static String _fmtEstat(int n) {
+    if (n >= 1000) return '$n';
+    return n.toString().padLeft(2, '0');
+  }
+
+  /// Esquerda: marcados como Fácil | Meio: ainda não Fácil | Direita: total no subtema.
+  Widget _indicadorSessaoTresNumeros(int faceis, int naoFaceis, int total) {
+    final a = _fmtEstat(faceis);
+    final b = _fmtEstat(naoFaceis);
+    final c = _fmtEstat(total);
+    return Tooltip(
+      message: '$a — marcados como Fácil (saíram da rotação principal)\n'
+          '$b — ainda não marcados como Fácil\n'
+          '$c — total de cards neste subtema',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E3A8A).withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border:
+              Border.all(color: const Color(0xFF1E3A8A).withValues(alpha: 0.2)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '$a - $b - $c',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5,
+                color: Color(0xFF1E3A8A),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> salvarProgresso(
+      String cardId, String dificuldade, int total) async {
     final progressoRef = FirebaseFirestore.instance
         .collection('users')
         .doc(widget.userId)
         .collection('progresso')
         .doc(cardId);
 
-    final resumoRef = FirebaseFirestore.instance
-        .collection('users')
-        .doc(widget.userId);
+    final resumoRef =
+        FirebaseFirestore.instance.collection('users').doc(widget.userId);
 
     final agora = DateTime.now();
 
@@ -433,7 +610,6 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
       'cardId': cardId,
       'userId': widget.userId,
       'materia': widget.materia,
-      'tema': widget.tema,
       'subtema': widget.subtema,
       'dificuldade': dificuldade,
       'nivel': novoNivel,
@@ -456,12 +632,16 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
     await resumoRef.set({
       'ultimoAcesso': FieldValue.serverTimestamp(),
       'ultimaMateria': widget.materia,
-      'ultimoTema': widget.tema,
       'ultimoSubtema': widget.subtema,
       'totalRespondidas': FieldValue.increment(1),
       'totalAcertos': FieldValue.increment(acertos),
       'totalErros': FieldValue.increment(erros),
     }, SetOptions(merge: true));
+  }
+
+  static String _truncarCampoFirestore(String s, [int max = 8000]) {
+    if (s.length <= max) return s;
+    return '${s.substring(0, max)}…';
   }
 
   Future<void> enviarReportErro({
@@ -478,17 +658,16 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
     await FirebaseFirestore.instance.collection('notificacoes_admin').add({
       'tipo': 'erro_card',
       'status': 'novo',
-      'mensagem': mensagem,
+      'mensagem': _truncarCampoFirestore(mensagem, 2000),
       'userId': widget.userId,
       'materia': widget.materia,
-      'tema': widget.tema,
       'subtema': widget.subtema,
       'flashcardDocId': cardId,
       'indiceCard': indiceCard,
       'totalCardsSubtema': totalCards,
-      'pergunta': pergunta,
-      'resposta': resposta,
-      'explicacao': explicacao,
+      'pergunta': _truncarCampoFirestore(pergunta),
+      'resposta': _truncarCampoFirestore(resposta),
+      'explicacao': _truncarCampoFirestore(explicacao),
       'criadoEm': Timestamp.fromDate(agora),
       'atualizadoEm': FieldValue.serverTimestamp(),
     });
@@ -502,35 +681,14 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
     required int indiceCard,
     required int totalCards,
   }) async {
-    final controller = TextEditingController();
+    if (!mounted) return;
 
-    final mensagem = await showDialog<String>(
+    final mensagem = await showReportTextDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Reportar erro'),
-          content: TextField(
-            controller: controller,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              hintText: 'Descreva o erro encontrado neste card',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context, controller.text.trim());
-              },
-              child: const Text('Enviar'),
-            ),
-          ],
-        );
-      },
+      title: 'Reportar erro',
+      hintText: 'Descreva o erro encontrado neste card',
+      maxLines: 6,
+      emptyMessage: 'Descreva o erro antes de enviar.',
     );
 
     if (mensagem == null || mensagem.isEmpty) return;
@@ -576,7 +734,8 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
     }
   }
 
-  Future<void> responderCard(String cardId, String dificuldade, int total) async {
+  Future<void> responderCard(
+      String cardId, String dificuldade, int total) async {
     if (salvando) return;
 
     setState(() {
@@ -594,14 +753,52 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
       //   ),
       // );
 
-      // Se for o último card, em vez de sair, mostramos a finalização do tema.
-      if (indiceAtual >= total - 1) {
-        if (!mounted) return;
-        setState(() {
+      if (!mounted) return;
+
+      var concluiuSessao = false;
+      setState(() {
+        // Atualiza aparições do card na sessão (conta a aparição atual)
+        final aparicoes = (_aparicoes[cardId] ?? 0) + 1;
+        _aparicoes[cardId] = aparicoes;
+        _vistosAoMenosUmaVez.add(cardId);
+
+        final atingiuMax = aparicoes >= _maxAparicoesPorCardNaSessao;
+
+        if (dificuldade == 'Fácil' || atingiuMax) {
+          // Fácil ou 4ª visualização: sai da rotação da sessão.
+          _removerCardDaRotacao(cardId);
+          _marcadosFaceis.add(cardId);
+        } else if (dificuldade == 'Difícil') {
+          _agendarRetorno(cardId, _intervaloOutrosCardsDificil);
+        } else if (dificuldade == 'Moderado') {
+          _agendarRetorno(cardId, _intervaloOutrosCardsModerado);
+        }
+
+        // Critérios de conclusão da sessão:
+        // - todos vistos ao menos 1x
+        // - meta de 50% dos cards em "Fácil"
+        final meta = _metaFaceis(_totalCardsSessao);
+        final podeConcluir = _vistosAoMenosUmaVez.length >= _totalCardsSessao &&
+            _marcadosFaceis.length >= meta;
+
+        if (podeConcluir) {
+          concluiuSessao = true;
           _assuntoConcluido = true;
-        });
+          _cardAtualId = null;
+          return;
+        }
+
+        // Avança seguindo a fila dinâmica.
+        _avancarParaProximoCard();
+      });
+      if (concluiuSessao) {
+        await FlashcardStudyDailyStore.clear(
+          userId: widget.userId,
+          materia: widget.materia,
+          subtema: widget.subtema,
+        );
       } else {
-        proximoCard(total);
+        _salvarSnapshotFireAndForget();
       }
     } catch (e) {
       if (!mounted) return;
@@ -631,375 +828,580 @@ class _TelaFlashcardsState extends State<TelaFlashcards> {
         title: Text(widget.subtema),
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            tooltip: 'Limpar progresso da sessão de hoje',
+            icon: const Icon(Icons.delete_sweep_outlined),
+            onPressed: salvando ? null : _confirmarELimparCacheSessaoDoDia,
+          ),
+        ],
       ),
-      body: SafeArea(
+      body: !_prefsReady
+          ? const Center(child: CircularProgressIndicator())
+          : SafeArea(
         child: Stack(
           children: [
             StreamBuilder<QuerySnapshot>(
+              // Com persistence ativa (main), esta query pode servir dados do cache offline.
               stream: FirebaseFirestore.instance
                   .collection('flashcards')
                   .where('materia', isEqualTo: widget.materia)
-                  .where('tema', isEqualTo: widget.tema)
                   .where('subtema', isEqualTo: widget.subtema)
-                  .snapshots(),
+                  .limit(ContentQueryLimits.maxStudySubtema)
+                  // Permite ler metadata.isFromCache (útil com persistence offline).
+                  .snapshots(includeMetadataChanges: true),
               builder: (context, snapshot) {
-            if (!snapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            final docs = snapshot.data!.docs;
-            debugPrint('Encontrados ${docs.length} flashcards para materia: ${widget.materia}, tema: ${widget.tema}, subtema: ${widget.subtema}');
-
-            if (docs.isEmpty) {
-              return const Center(child: Text('Sem flashcards'));
-            }
-
-            if (indiceAtual >= docs.length) {
-              indiceAtual = 0;
-            }
-
-            final data = docs[indiceAtual];
-            final cardId = data.id;
-            final indiceCard = indiceAtual + 1;
-
-            final perguntaTexto = _normalizarConteudoRichText(data['pergunta']);
-            final respostaTexto = _normalizarConteudoRichText(data['resposta']);
-            final imagemPergunta = data['imagemPergunta'] ?? '';
-            final imagemResposta = data['imagemResposta'] ?? '';
-            final explicacao = _normalizarConteudoRichText(data['explicacao']);
-
-            // Tela final do tema/subtema (se o usuário concluiu o último card)
-            if (_assuntoConcluido) {
-              return Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: Center(
-                        child: FutureBuilder<String>(
-                          future: _carregarNomeAluno(),
-                          builder: (context, snap) {
-                            final nome = snap.data ?? 'Aluno(a)';
-                            return Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.emoji_events_outlined,
-                                  size: 64,
-                                  color: Color(0xFF1E3A8A),
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'Parabéns Dr.(a) $nome!',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF1E3A8A),
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                const Text(
-                                  'Você concluiu mais um tema.\nFoco, disciplina e constância é o caminho do sucesso.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 16),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'Não foi possível carregar os flashcards.\n'
+                        'Se estiver offline, abra este subtema ao menos uma vez com rede para guardar em cache.\n\n'
+                        '${snapshot.error}',
+                        textAlign: TextAlign.center,
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: [
-                        _FooterActionButton(
-                          texto: 'Resolver questões',
-                          icone: Icons.quiz,
-                          cor: const Color(0xFF1E3A8A),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => QuestoesPage(
-                                  userId: widget.userId,
-                                  materia: widget.materia,
-                                  tema: widget.tema,
-                                  subtema: widget.subtema,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                        _FooterActionButton(
-                          texto: 'Cronograma',
-                          icone: Icons.schedule,
-                          cor: Colors.blueGrey,
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => CronogramaPage(
-                                  userId: widget.userId,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                        _FooterActionButton(
-                          texto: 'Home',
-                          icone: Icons.home,
-                          cor: const Color(0xFF1E3A8A),
-                          onPressed: () {
-                            Navigator.popUntil(context, (route) => route.isFirst);
-                          },
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: bottomPadding),
-                  ],
-                ),
-              );
-            }
+                  );
+                }
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-            return Column(
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(
+                // Ordem: [sortFlashcardDocsPorEstudo] — ordemEstudo (criação/reordenação) e,
+                // para legado sem campo, desempate por [createdAt].
+                final docs = snapshot.data!.docs.toList();
+                sortFlashcardDocsPorEstudo(docs);
+                debugPrint(
+                    'Encontrados ${docs.length} flashcards para materia: ${widget.materia}, subtema: ${widget.subtema}');
+
+                if (docs.isEmpty) {
+                  return const Center(child: Text('Sem flashcards'));
+                }
+
+                // Inicia/sincroniza sessão baseada nos docs atuais
+                _iniciarOuSincronizarSessao(docs);
+
+                // Se não há card atual e ainda não concluiu, tenta avançar
+                if (_cardAtualId == null && !_assuntoConcluido) {
+                  _avancarParaProximoCard();
+                }
+
+                final cardId = _cardAtualId;
+
+                // Tela final do tema/subtema (se o usuário concluiu a sessão)
+                if (_assuntoConcluido || cardId == null) {
+                  return Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(32),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Colors.white, Colors.grey[50]!],
-                        ),
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.1),
-                            blurRadius: 20,
-                            offset: const Offset(0, 10),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: [
-                          GestureDetector(
-                            onTap: () => setState(
-                                () {
-                                  mostrandoResposta = !mostrandoResposta;
-                                  _mostrarExplicacao = false;
-                                }),
-                            child: Column(
-                              children: [
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text(
-                                    mostrandoResposta ? 'RESPOSTA' : 'PERGUNTA',
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 1.1,
-                                      color: Color(0xFF1E3A8A),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                _buildConteudoFormatado(
-                                  valor: mostrandoResposta ? data['resposta'] : data['pergunta'],
-                                  destaquePergunta: !mostrandoResposta,
-                                ),
-                                const SizedBox(height: 16),
-                                if (!mostrandoResposta &&
-                                    imagemPergunta.toString().isNotEmpty)
-                                  _buildImagemUrl(imagemPergunta.toString()),
-                                if (mostrandoResposta &&
-                                    imagemResposta.toString().isNotEmpty)
-                                  _buildImagemUrl(imagemResposta.toString()),
-                                if (mostrandoResposta &&
-                                    explicacao.toString().isNotEmpty) ...[
-                                  const SizedBox(height: 12),
-                                  Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: TextButton(
-                                      onPressed: () {
-                                        setState(() {
-                                          _mostrarExplicacao =
-                                              !_mostrarExplicacao;
-                                        });
-                                      },
-                                      child: Text(
-                                        _mostrarExplicacao
-                                            ? 'OCULTAR EXPLICAÇÃO'
-                                            : 'MOSTRAR EXPLICAÇÃO',
-                                      ),
-                                    ),
-                                  ),
-                                  if (_mostrarExplicacao)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: Column(
-                                        children: [
-                                          const Text(
-                                            '💡',
-                                            textAlign: TextAlign.center,
-                                          ),
-                                          _buildConteudoFormatado(
-                                            valor: data['explicacao'],
-                                            destaquePergunta: false,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          if (mostrandoResposta) ...[
-                            const SizedBox(height: 20),
-                            const Divider(),
-                            const SizedBox(height: 8),
-                            if (enviandoReport)
-                              const Padding(
-                                padding: EdgeInsets.only(bottom: 8),
-                                child: CircularProgressIndicator(),
-                              ),
-                            TextButton.icon(
-                              onPressed: enviandoReport
-                                  ? null
-                                  : () => mostrarDialogReport(
-                                        cardId: cardId,
-                                        pergunta: perguntaTexto,
-                                        resposta: respostaTexto,
-                                        explicacao: explicacao,
-                                        indiceCard: indiceCard,
-                                        totalCards: docs.length,
-                                      ),
-                              icon: const Icon(Icons.report_problem_outlined),
-                              label: Text(
-                                'Reportar erro no card $indiceCard/${docs.length}',
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                if (mostrandoResposta)
-                  Container(
-                    padding: EdgeInsets.fromLTRB(24, 20, 24, bottomPadding),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black12,
-                          blurRadius: 10,
-                          offset: Offset(0, -2),
-                        ),
-                      ],
-                    ),
                     child: Column(
                       children: [
-                        const Text(
-                          'Como foi essa questão?',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+                        Expanded(
+                          child: Center(
+                            child: FutureBuilder<String>(
+                              future: _carregarNomeAluno(),
+                              builder: (context, snap) {
+                                final nome = snap.data ?? 'Aluno(a)';
+                                return Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.emoji_events_outlined,
+                                      size: 64,
+                                      color: Color(0xFF1E3A8A),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      'Parabéns Dr.(a) $nome!',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF1E3A8A),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    const Text(
+                                      'Sessão concluída.\nFoco, disciplina e constância é o caminho do sucesso.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(fontSize: 16),
+                                    ),
+                                    if (_sessaoEsgotada) ...[
+                                      const SizedBox(height: 10),
+                                      const Text(
+                                        'Sessão finalizada: limite de aparições atingido para os cards restantes.',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: Colors.black54),
+                                      ),
+                                    ],
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      'Fácil: ${_marcadosFaceis.length}/$_totalCardsSessao (meta: ${_metaFaceis(_totalCardsSessao)})',
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 20),
-                        if (salvando)
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 16),
-                            child: CircularProgressIndicator(),
-                          ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
                           children: [
-                            _BotaoDificuldade(
-                              texto: 'Fácil',
-                              cor: Colors.green,
-                              onPressed: () => responderCard(
-                                cardId,
-                                'Fácil',
-                                docs.length,
-                              ),
+                            _FooterActionButton(
+                              texto: 'Resolver questões',
+                              icone: Icons.quiz,
+                              cor: const Color(0xFF1E3A8A),
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => QuestoesPage(
+                                      userId: widget.userId,
+                                      materia: widget.materia,
+                                      subtema: widget.subtema,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
-                            _BotaoDificuldade(
-                              texto: 'Moderado',
+                            _FooterActionButton(
+                              texto: 'Cronograma',
+                              icone: Icons.schedule,
                               cor: Colors.blueGrey,
-                              onPressed: () => responderCard(
-                                cardId,
-                                'Moderado',
-                                docs.length,
-                              ),
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => CronogramaPage(
+                                      userId: widget.userId,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
-                            _BotaoDificuldade(
-                              texto: 'Difícil',
-                              cor: Colors.orange,
-                              onPressed: () => responderCard(
-                                cardId,
-                                'Difícil',
-                                docs.length,
-                              ),
+                            _FooterActionButton(
+                              texto: 'Home',
+                              icone: Icons.home,
+                              cor: const Color(0xFF1E3A8A),
+                              onPressed: () {
+                                Navigator.popUntil(
+                                    context, (route) => route.isFirst);
+                              },
                             ),
                           ],
                         ),
+                        SizedBox(height: bottomPadding),
                       ],
                     ),
-                  )
-                else
-                  Container(
-                    padding: EdgeInsets.fromLTRB(24, 24, 24, bottomPadding),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black12,
-                          blurRadius: 10,
-                          offset: Offset(0, -2),
-                        ),
-                      ],
-                    ),
-                    child: ElevatedButton(
-                      onPressed: () => setState(() {
-                        mostrandoResposta = true;
-                        _mostrarExplicacao = false;
-                      }),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1E3A8A),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 32,
-                          vertical: 16,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                  );
+                }
+
+                QueryDocumentSnapshot? docAtual;
+                for (final d in docs) {
+                  if (d.id == cardId) {
+                    docAtual = d;
+                    break;
+                  }
+                }
+                if (docAtual == null) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) return;
+                    setState(() {
+                      _cardAtualId = null;
+                      _avancarParaProximoCard();
+                    });
+                  });
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final data = docAtual.data() as Map<String, dynamic>;
+                final idsSetAtual = docs.map((d) => d.id).toSet();
+                final nFaceis =
+                    _marcadosFaceis.where(idsSetAtual.contains).length;
+                final totalSub = docs.length;
+                final nNaoFaceis = (totalSub - nFaceis).clamp(0, totalSub);
+
+                final perguntaTexto =
+                    _normalizarConteudoRichText(data['pergunta']);
+                final respostaTexto =
+                    _normalizarConteudoRichText(data['resposta']);
+                final imagemPerguntaLocal =
+                    (data['imagemPerguntaLocal'] ?? '').toString().trim();
+                final imagemRespostaLocal =
+                    flashcardMigrateImageFieldToStorageRef(
+                  (data['imagemRespostaLocal'] ?? '').toString(),
+                );
+                final imagemExplicacaoLocal =
+                    flashcardMigrateImageFieldToStorageRef(
+                  (data['imagemExplicacaoLocal'] ?? '').toString(),
+                );
+                final legadoImagemLocal =
+                    (data['imagemLocal'] ?? '').toString().trim();
+                var imagemPerguntaEfetiva =
+                    flashcardMigrateImageFieldToStorageRef(imagemPerguntaLocal);
+                if (imagemPerguntaEfetiva.isEmpty &&
+                    legadoImagemLocal.isNotEmpty &&
+                    !legadoImagemLocal.contains('..') &&
+                    !legadoImagemLocal.toLowerCase().startsWith('http')) {
+                  imagemPerguntaEfetiva =
+                      flashcardMigrateImageFieldToStorageRef(legadoImagemLocal);
+                }
+                final explicacao =
+                    _normalizarConteudoRichText(data['explicacao']);
+                final indiceCard =
+                    (_vistosAoMenosUmaVez.length + 1).clamp(1, docs.length);
+
+                return Column(
+                  children: [
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 720),
+                            child: Container(
+                              width: double.infinity,
+                              padding:
+                                  const EdgeInsets.fromLTRB(20, 24, 20, 26),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [Colors.white, Colors.grey[50]!],
+                                ),
+                                borderRadius: BorderRadius.circular(24),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.1),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 10),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                children: [
+                                  GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: () => setState(() {
+                                      mostrandoResposta = !mostrandoResposta;
+                                      _mostrarExplicacao = false;
+                                    }),
+                                    child: Column(
+                                      children: [
+                                        Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Expanded(
+                                              child: Align(
+                                                alignment: Alignment.centerLeft,
+                                                child: Text(
+                                                  mostrandoResposta
+                                                      ? 'RESPOSTA'
+                                                      : 'PERGUNTA',
+                                                  style: const TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.bold,
+                                                    letterSpacing: 1.1,
+                                                    color: Color(0xFF1E3A8A),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            _indicadorSessaoTresNumeros(
+                                              nFaceis,
+                                              nNaoFaceis,
+                                              totalSub,
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 10),
+                                        _conteudoRichCard(
+                                          cardId: cardId,
+                                          valor: mostrandoResposta
+                                              ? data['resposta']
+                                              : data['pergunta'],
+                                          destaque: !mostrandoResposta,
+                                          materia: (data['materia'] ??
+                                                  widget.materia)
+                                              .toString(),
+                                        ),
+                                        if (!mostrandoResposta &&
+                                            imagemPerguntaEfetiva
+                                                .isNotEmpty) ...[
+                                          const SizedBox(height: 16),
+                                          buildImagemPergunta(
+                                            imagemPerguntaEfetiva,
+                                            studyFullscreenTap: true,
+                                          ),
+                                        ],
+                                        if (mostrandoResposta &&
+                                            imagemRespostaLocal.isNotEmpty) ...[
+                                          const SizedBox(height: 16),
+                                          buildImagemResposta(
+                                            imagemRespostaLocal,
+                                            studyFullscreenTap: true,
+                                          ),
+                                        ],
+                                        if (mostrandoResposta &&
+                                            explicacao.isNotEmpty) ...[
+                                          const SizedBox(height: 12),
+                                          Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: OutlinedButton(
+                                              onPressed: () {
+                                                setState(() {
+                                                  _mostrarExplicacao =
+                                                      !_mostrarExplicacao;
+                                                });
+                                              },
+                                              style: OutlinedButton.styleFrom(
+                                                foregroundColor:
+                                                    const Color(0xFF1E3A8A),
+                                                side: BorderSide(
+                                                  color: const Color(0xFF1E3A8A)
+                                                      .withValues(alpha: 0.35),
+                                                  width: 1,
+                                                ),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 10,
+                                                  vertical: 6,
+                                                ),
+                                                minimumSize: const Size(0, 0),
+                                                tapTargetSize:
+                                                    MaterialTapTargetSize
+                                                        .shrinkWrap,
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
+                                                ),
+                                              ),
+                                              child: Text(
+                                                _mostrarExplicacao
+                                                    ? 'OCULTAR EXPLICAÇÃO'
+                                                    : 'MOSTRAR EXPLICAÇÃO',
+                                              ),
+                                            ),
+                                          ),
+                                          if (_mostrarExplicacao)
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.only(top: 4),
+                                              child: Column(
+                                                children: [
+                                                  const Text(
+                                                    '💡',
+                                                    textAlign: TextAlign.center,
+                                                  ),
+                                                  _conteudoRichCard(
+                                                    cardId: '${cardId}_exp',
+                                                    valor: data['explicacao'],
+                                                    destaque: false,
+                                                    materia: (data['materia'] ??
+                                                            widget.materia)
+                                                        .toString(),
+                                                  ),
+                                                  if (imagemExplicacaoLocal
+                                                      .isNotEmpty) ...[
+                                                    const SizedBox(height: 12),
+                                                    buildImagemExplicacao(
+                                                      imagemExplicacaoLocal,
+                                                      studyFullscreenTap: true,
+                                                    ),
+                                                  ],
+                                                ],
+                                              ),
+                                            ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  if (mostrandoResposta) ...[
+                                    const SizedBox(height: 20),
+                                    const Divider(),
+                                    const SizedBox(height: 8),
+                                    if (enviandoReport)
+                                      const Padding(
+                                        padding: EdgeInsets.only(bottom: 8),
+                                        child: CircularProgressIndicator(),
+                                      ),
+                                    TextButton.icon(
+                                      onPressed: enviandoReport
+                                          ? null
+                                          : () => mostrarDialogReport(
+                                                cardId: cardId,
+                                                pergunta: perguntaTexto,
+                                                resposta: respostaTexto,
+                                                explicacao: explicacao,
+                                                indiceCard: indiceCard,
+                                                totalCards: docs.length,
+                                              ),
+                                      icon: const Icon(
+                                        Icons.report_problem_outlined,
+                                        color: Color(0xFFFBBF24),
+                                      ),
+                                      label: const Text('Reportar erro'),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                      child: const Text(
-                        'Mostrar Resposta',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+                    ),
+                    if (mostrandoResposta)
+                      Container(
+                        padding: EdgeInsets.fromLTRB(24, 16, 24, bottomPadding),
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black12,
+                              blurRadius: 10,
+                              offset: Offset(0, -2),
+                            ),
+                          ],
                         ),
+                        child: Column(
+                          children: [
+                            if (salvando)
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 12),
+                                child: CircularProgressIndicator(),
+                              ),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              children: [
+                                _BotaoDificuldade(
+                                  texto: 'Fácil',
+                                  cor: Colors.green,
+                                  onPressed: () => responderCard(
+                                    cardId,
+                                    'Fácil',
+                                    docs.length,
+                                  ),
+                                ),
+                                _BotaoDificuldade(
+                                  texto: 'Moderado',
+                                  cor: Colors.orange,
+                                  onPressed: () => responderCard(
+                                    cardId,
+                                    'Moderado',
+                                    docs.length,
+                                  ),
+                                ),
+                                _BotaoDificuldade(
+                                  texto: 'Difícil',
+                                  cor: Colors.red,
+                                  onPressed: () => responderCard(
+                                    cardId,
+                                    'Difícil',
+                                    docs.length,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Container(
+                        padding: EdgeInsets.fromLTRB(24, 20, 24, bottomPadding),
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black12,
+                              blurRadius: 10,
+                              offset: Offset(0, -2),
+                            ),
+                          ],
+                        ),
+                        child: ElevatedButton(
+                          onPressed: () => setState(() {
+                            mostrandoResposta = true;
+                            _mostrarExplicacao = false;
+                          }),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1E3A8A),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 32,
+                              vertical: 16,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'Mostrar Resposta',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+            const StudyTimerOverlay(),
+            if (_netOffline)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                child: Material(
+                  elevation: 6,
+                  color: Colors.orange.shade800,
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: const [
+                          Icon(
+                            Icons.cloud_off_outlined,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Sem internet — usando dados em cache do Firestore e de imagens quando disponíveis.',
+                              style:
+                                  TextStyle(color: Colors.white, fontSize: 13),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-              ],
-            );
-          },
-        ),
-            const StudyTimerOverlay(),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
+}
+
+class _CardRetorno {
+  final String cardId;
+  int faltam;
+
+  _CardRetorno({
+    required this.cardId,
+    required this.faltam,
+  });
 }
 
 class _BotaoDificuldade extends StatelessWidget {

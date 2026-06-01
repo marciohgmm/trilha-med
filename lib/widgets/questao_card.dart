@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 import 'dart:math';
 
 import '../models/questao_model.dart';
+import '../models/questao_exceptions.dart';
 import '../services/questao_service.dart';
+import '../utils/report_message_dialog.dart';
 
 class QuestaoCard extends StatefulWidget {
   final QuestaoModel questao;
   final String? userId;
   final bool showNextButton;
   final VoidCallback? onNext;
+  final void Function(String alternativaId, bool acertou)? onAnswered;
 
   const QuestaoCard({
     super.key,
@@ -16,6 +19,7 @@ class QuestaoCard extends StatefulWidget {
     this.userId,
     this.showNextButton = false,
     this.onNext,
+    this.onAnswered,
   });
 
   @override
@@ -34,7 +38,8 @@ class _QuestaoCardState extends State<QuestaoCard> {
   void _submitAnswer() {
     if (_selectedId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecione uma alternativa antes de responder.')),
+        const SnackBar(
+            content: Text('Selecione uma alternativa antes de responder.')),
       );
       return;
     }
@@ -45,9 +50,11 @@ class _QuestaoCardState extends State<QuestaoCard> {
       _showExplicacao = false;
     });
 
+    final acertou = _selectedId == widget.questao.corretaId;
+    widget.onAnswered?.call(_selectedId!, acertou);
+
     final userId = widget.userId;
     if (userId != null && userId.isNotEmpty) {
-      final acertou = _selectedId == widget.questao.corretaId;
       // Fire-and-forget: não bloqueia UI.
       QuestaoService().registrarResposta(
         userId: userId,
@@ -68,35 +75,17 @@ class _QuestaoCardState extends State<QuestaoCard> {
   }
 
   Future<void> _reportarErro() async {
-    final controller = TextEditingController();
-    final motivo = await showDialog<String>(
+    if (!mounted) return;
+
+    final motivo = await showReportTextDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Reportar erro na questão'),
-          content: TextField(
-            controller: controller,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              hintText: 'Descreva o erro (opcional)',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, controller.text.trim()),
-              child: const Text('Enviar'),
-            ),
-          ],
-        );
-      },
+      title: 'Reportar erro na questão',
+      hintText: 'Descreva o erro encontrado',
+      maxLines: 6,
+      emptyMessage: 'Descreva o erro antes de enviar.',
     );
 
-    if (motivo == null) return;
+    if (motivo == null || motivo.isEmpty) return;
 
     setState(() {
       _reportando = true;
@@ -110,12 +99,22 @@ class _QuestaoCardState extends State<QuestaoCard> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Reporte enviado para o admin. Obrigado!')),
+        const SnackBar(
+            content: Text('Reporte enviado para o admin. Obrigado!')),
+      );
+    } on QuestaoReportAlreadyExistsException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Você já reportou esta questão anteriormente.'),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao enviar reporte: $e'), backgroundColor: Colors.red),
+        SnackBar(
+            content: Text('Erro ao enviar reporte: $e'),
+            backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) {
@@ -149,7 +148,9 @@ class _QuestaoCardState extends State<QuestaoCard> {
               ),
             ),
             const SizedBox(height: 16),
-            RadioGroup<String>(
+            IgnorePointer(
+              ignoring: _answered,
+              child: RadioGroup<String>(
               groupValue: _selectedId,
               onChanged: (value) {
                 if (_answered) return;
@@ -171,7 +172,6 @@ class _QuestaoCardState extends State<QuestaoCard> {
                     Color borderColor = Colors.grey.shade300;
                     Color? backgroundColor;
 
-                    // Seleção (antes de responder): deixa um verde bem claro.
                     if (!_answered && isSelected) {
                       backgroundColor = Colors.green.withValues(alpha: 0.08);
                       borderColor = Colors.green.withValues(alpha: 0.55);
@@ -182,22 +182,34 @@ class _QuestaoCardState extends State<QuestaoCard> {
                       if (isCorrect) backgroundColor = Colors.green.shade50;
                     }
 
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      decoration: BoxDecoration(
-                        color: backgroundColor ?? Colors.white,
-                        border: Border.all(color: borderColor),
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
                         borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: RadioListTile<String>(
-                        value: alternativa.id,
-                        enabled: !_answered,
-                        title: Text(
-                          '$label) ${alternativa.texto}',
-                          style: TextStyle(
-                            color: _answered && isCorrect
-                                ? Colors.green.shade900
-                                : Colors.black87,
+                        onTap: _answered
+                            ? null
+                            : () {
+                                setState(() {
+                                  _selectedId = alternativa.id;
+                                });
+                              },
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          decoration: BoxDecoration(
+                            color: backgroundColor ?? Colors.white,
+                            border: Border.all(color: borderColor),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: RadioListTile<String>(
+                            value: alternativa.id,
+                            title: Text(
+                              '$label) ${alternativa.texto}',
+                              style: TextStyle(
+                                color: _answered && isCorrect
+                                    ? Colors.green.shade900
+                                    : Colors.black87,
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -206,19 +218,12 @@ class _QuestaoCardState extends State<QuestaoCard> {
                 ).toList(),
               ),
             ),
-            const SizedBox(height: 10),
-            if (!_answered)
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _submitAnswer,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E3A8A),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: const Text('Responder'),
-                ),
-              ),
+            ),
+            const SizedBox(height: 14),
+            if (!_answered) _ResponderButton(
+              hasSelection: _selectedId != null,
+              onPressed: _submitAnswer,
+            ),
             if (_answered) ...[
               Row(
                 children: [
@@ -230,7 +235,8 @@ class _QuestaoCardState extends State<QuestaoCard> {
                   Text(
                     acertou ? 'Resposta correta' : 'Resposta incorreta',
                     style: TextStyle(
-                      color: acertou ? Colors.green.shade700 : Colors.red.shade700,
+                      color:
+                          acertou ? Colors.green.shade700 : Colors.red.shade700,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -243,77 +249,77 @@ class _QuestaoCardState extends State<QuestaoCard> {
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 10),
-                ...(() {
-                  final alts = List<QuestaoAlternativa>.from(questao.alternativas)
-                    ..sort((a, b) => a.id.compareTo(b.id));
+                ..._alternativasEmbaralhadas.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final alt = entry.value;
+                  final label = index < _labels.length
+                      ? _labels[index]
+                      : '${index + 1}';
+                  final isCorrect = alt.id == questao.corretaId;
+                  final justificativa =
+                      questao.justificativasPorAlternativa[alt.id] ??
+                          questao.explicacoesErradas[alt.id] ??
+                          '';
 
-                  return alts.map((alt) {
-                    final isCorrect = alt.id == questao.corretaId;
-                    final justificativa =
-                        questao.justificativasPorAlternativa[alt.id] ??
-                            questao.explicacoesErradas[alt.id] ??
-                            '';
-
-                    return Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isCorrect
+                          ? Colors.green.withValues(alpha: 0.08)
+                          : Colors.grey.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
                         color: isCorrect
-                            ? Colors.green.withValues(alpha: 0.08)
-                            : Colors.grey.withValues(alpha: 0.06),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isCorrect
-                              ? Colors.green.withValues(alpha: 0.45)
-                              : Colors.grey.withValues(alpha: 0.25),
-                        ),
+                            ? Colors.green.withValues(alpha: 0.45)
+                            : Colors.grey.withValues(alpha: 0.25),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                '${alt.id}) ',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: isCorrect
-                                      ? Colors.green.shade800
-                                      : Colors.black87,
-                                ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              '$label) ',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: isCorrect
+                                    ? Colors.green.shade800
+                                    : Colors.black87,
                               ),
-                              Expanded(
-                                child: Text(
-                                  alt.texto,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                              if (isCorrect)
-                                const Icon(
-                                  Icons.check_circle,
-                                  color: Colors.green,
-                                  size: 18,
-                                ),
-                            ],
-                          ),
-                          if (justificativa.trim().isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Text(justificativa),
-                          ] else ...[
-                            const SizedBox(height: 8),
-                            const Text(
-                              'Sem explicação cadastrada.',
-                              style: TextStyle(color: Colors.black54),
                             ),
+                            Expanded(
+                              child: Text(
+                                alt.texto,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            if (isCorrect)
+                              const Icon(
+                                Icons.check_circle,
+                                color: Colors.green,
+                                size: 18,
+                              ),
                           ],
+                        ),
+                        if (justificativa.trim().isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(justificativa),
+                        ] else ...[
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Sem explicação cadastrada.',
+                            style: TextStyle(color: Colors.black54),
+                          ),
                         ],
-                      ),
-                    );
-                  });
-                })(),
+                      ],
+                    ),
+                  );
+                }),
                 const SizedBox(height: 4),
               ],
               Row(
@@ -325,7 +331,9 @@ class _QuestaoCardState extends State<QuestaoCard> {
                           _showExplicacao = !_showExplicacao;
                         });
                       },
-                      child: Text(_showExplicacao ? 'Ocultar explicação' : 'Mostrar explicação'),
+                      child: Text(_showExplicacao
+                          ? 'Ocultar explicação'
+                          : 'Mostrar explicação'),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -362,6 +370,86 @@ class _QuestaoCardState extends State<QuestaoCard> {
               ],
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Botão principal de confirmação da resposta — destaque visual e feedback ao selecionar.
+class _ResponderButton extends StatelessWidget {
+  final bool hasSelection;
+  final VoidCallback onPressed;
+
+  const _ResponderButton({
+    required this.hasSelection,
+    required this.onPressed,
+  });
+
+  static const _primary = Color(0xFF1E3A8A);
+  static const _accent = Color(0xFF2563EB);
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedScale(
+      scale: hasSelection ? 1.0 : 0.98,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+        width: double.infinity,
+        height: 52,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: hasSelection
+                ? const [_primary, _accent]
+                : [
+                    _primary.withValues(alpha: 0.72),
+                    _accent.withValues(alpha: 0.72),
+                  ],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: _primary.withValues(alpha: hasSelection ? 0.38 : 0.18),
+              blurRadius: hasSelection ? 14 : 8,
+              offset: Offset(0, hasSelection ? 6 : 3),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(14),
+            splashColor: Colors.white.withValues(alpha: 0.2),
+            highlightColor: Colors.white.withValues(alpha: 0.1),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  hasSelection
+                      ? Icons.send_rounded
+                      : Icons.touch_app_outlined,
+                  color: Colors.white,
+                  size: 22,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  hasSelection ? 'Confirmar resposta' : 'Responder',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/criar_flashcard_page.dart';
 import 'package:flutter_application_1/screens/admin_materias_page.dart';
+import 'package:flutter_application_1/screens/admin_global_message_page.dart';
 import 'package:flutter_application_1/screens/admin_notificacoes_page.dart';
 import 'package:flutter_application_1/screens/admin_questoes_materias_page.dart';
 import 'package:flutter_application_1/services/firebase_service.dart';
+import 'package:flutter_application_1/screens/admin/admin_live_events_page.dart';
+import 'package:flutter_application_1/screens/admin/admin_osce_cases_list_page.dart';
+import 'package:flutter_application_1/widgets/admin/admin_gate.dart';
+import 'package:flutter_application_1/widgets/admin/rbac_guard.dart';
+import 'package:flutter_application_1/screens/master_admin/master_admin_shell.dart';
+import 'package:flutter_application_1/core/permissions/app_permission.dart';
 
 class AdminPage extends StatelessWidget {
   const AdminPage({super.key});
@@ -21,7 +28,8 @@ class AdminPage extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         leading: Container(
           width: 52,
           height: 52,
@@ -110,7 +118,8 @@ class AdminPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return AdminGate(
+      child: Scaffold(
       backgroundColor: const Color(0xFFF0F4F8),
       appBar: AppBar(
         title: const Text('Área Administrativa'),
@@ -138,6 +147,20 @@ class AdminPage extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           _botaoAdmin(
+            icon: Icons.dashboard_customize_outlined,
+            titulo: 'Painel Mestre da Plataforma',
+            subtitulo:
+                'Dashboard, usuários, assinaturas, vendedores, auditoria e mais',
+            onTap: () {
+              RbacGuard.pushIfAllowed(
+                context: context,
+                routeName: 'master.shell',
+                permission: AppPermission.dashboardView,
+                page: const MasterAdminShell(),
+              );
+            },
+          ),
+          _botaoAdmin(
             icon: Icons.notifications_active_outlined,
             titulo: 'Notificações admin',
             subtitulo: 'Ver reports de erro e mensagens recebidas',
@@ -151,9 +174,23 @@ class AdminPage extends StatelessWidget {
             },
           ),
           _botaoAdmin(
+            icon: Icons.campaign_outlined,
+            titulo: 'Mensagem global',
+            subtitulo:
+                'Enviar aviso em popup para todos os usuários (uma vez por versão)',
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const AdminGlobalMessagePage(),
+                ),
+              );
+            },
+          ),
+          _botaoAdmin(
             icon: Icons.add_box_outlined,
             titulo: 'Criar flashcard',
-            subtitulo: 'Adicionar novo card usando matéria, tema e subtema',
+            subtitulo: 'Adicionar novo card usando matéria e subtema',
             onTap: () async {
               await Navigator.push(
                 context,
@@ -166,7 +203,7 @@ class AdminPage extends StatelessWidget {
           _botaoAdmin(
             icon: Icons.edit_note_outlined,
             titulo: 'Gerenciar cards',
-            subtitulo: 'Abrir matérias, temas, subtemas e editar cards',
+            subtitulo: 'Abrir matérias, subtemas e editar cards',
             onTap: () async {
               await Navigator.push(
                 context,
@@ -190,6 +227,33 @@ class AdminPage extends StatelessWidget {
             },
           ),
           _botaoAdmin(
+            icon: Icons.medical_information_outlined,
+            titulo: 'Fase Prática — Casos / Temas',
+            subtitulo:
+                'Criar e editar casos clínicos usados nas salas multiplayer',
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const AdminOsceCasesListPage(),
+                ),
+              );
+            },
+          ),
+          _botaoAdmin(
+            icon: Icons.local_fire_department,
+            titulo: 'Eventos ao vivo',
+            subtitulo: 'Último Sobrevivente — criar, iniciar e painel ao vivo',
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const AdminLiveEventsPage(),
+                ),
+              );
+            },
+          ),
+          _botaoAdmin(
             icon: Icons.file_upload_outlined,
             titulo: 'Importar flashcards',
             subtitulo: 'Importar cards em arquivo JSON',
@@ -203,6 +267,7 @@ class AdminPage extends StatelessWidget {
           ),
         ],
       ),
+    ),
     );
   }
 }

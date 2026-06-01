@@ -1,14 +1,23 @@
-import 'dart:io';
 import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/services/firebase_service.dart';
+import 'package:flutter_application_1/services/flashcard_materia_stats_service.dart';
+import 'package:flutter_application_1/services/flashcard_subtema_catalog_service.dart';
+import 'package:flutter_application_1/services/flashcard_create_session_defaults.dart';
+import 'package:flutter_application_1/utils/content_hierarchy_utils.dart';
+import 'package:flutter_application_1/widgets/subtema_search_field.dart';
+import 'package:flutter_application_1/utils/flashcard_storage_upload.dart';
+import 'package:flutter_application_1/utils/image_helper.dart';
+import 'package:flutter_application_1/widgets/flashcard_readonly_quill.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:flutter_quill_extensions/flutter_quill_extensions.dart';
 import 'package:http/http.dart' as http;
+
+enum _SlotImagemCard { pergunta, resposta, explicacao }
 
 class CriarFlashcardPage extends StatefulWidget {
   final String? cardId;
@@ -43,19 +52,22 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
   final FirebaseService firebaseService = FirebaseService();
 
   List<String> materias = [];
-  List<String> temas = [];
   List<String> subtemas = [];
 
   String? materiaSelecionada;
-  String? temaSelecionado;
   String? subtemaSelecionado;
 
   bool carregando = true;
   bool salvando = false;
-  bool _enviandoImagem = false;
+  bool _enviandoImagemCard = false;
+
+  String _imagemPerguntaLocal = '';
+  String _imagemRespostaLocal = '';
+  String _imagemExplicacaoLocal = '';
 
   bool get modoEdicao => widget.cardId != null && widget.dados != null;
 
+  /// Sem `dart:io`: compatível com Web e VM.
   Future<void> _debugLog({
     required String hypothesisId,
     required String location,
@@ -72,6 +84,7 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
       'data': data,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
+    debugPrint('[flashcard_debug] $message ${jsonEncode(data)}');
     if (kIsWeb) {
       try {
         await http.post(
@@ -85,14 +98,7 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
           body: jsonEncode(payload),
         );
       } catch (_) {}
-      return;
     }
-
-    try {
-      await File(
-        'debug-f07c83.log',
-      ).writeAsString('${jsonEncode(payload)}\n', mode: FileMode.append);
-    } catch (_) {}
   }
 
   @override
@@ -155,35 +161,22 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
   }
 
   Future<void> carregarMaterias() async {
-    // #region agent log
     await _debugLog(
       hypothesisId: 'H2',
-      location: 'criar_flashcard_page.dart:92',
+      location: 'criar_flashcard_page.dart:carregarMaterias',
       message: 'carregarMaterias:start',
       data: {'modoEdicao': modoEdicao},
     );
-    // #endregion
-    final snapshot =
-        await FirebaseFirestore.instance.collection('flashcards').get();
-
-    final set = <String>{};
-
-    for (final doc in snapshot.docs) {
-      final materia = (doc.data()['materia'] ?? '').toString().trim();
-      if (materia.isNotEmpty) {
-        set.add(materia);
-      }
-    }
-
-    final lista = set.toList()..sort();
-    // #region agent log
+    final stats = await FlashcardMateriaStatsService.instance.fetchMateriaStats();
+    final lista = ContentHierarchyUtils.sortAlphabetically(
+      stats.map((s) => s.name),
+    );
     await _debugLog(
       hypothesisId: 'H2',
-      location: 'criar_flashcard_page.dart:104',
+      location: 'criar_flashcard_page.dart:carregarMaterias',
       message: 'carregarMaterias:loaded',
       data: {'materiasCount': lista.length},
     );
-    // #endregion
 
     if (!mounted) return;
 
@@ -194,27 +187,39 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
     if (modoEdicao) {
       await _preencherDadosEdicao();
     } else {
+      await _aplicarUltimosAssuntosSeDisponivel();
+      if (!mounted) return;
       setState(() {
         carregando = false;
       });
     }
   }
 
+  /// Reaplica matéria/subtema da sessão ([FlashcardCreateSessionDefaults]) ao criar novo card.
+  Future<void> _aplicarUltimosAssuntosSeDisponivel() async {
+    if (modoEdicao) return;
+    if (!FlashcardCreateSessionDefaults.hasPair) return;
+
+    final m = FlashcardCreateSessionDefaults.ultimaMateriaSelecionada!.trim();
+    final s = FlashcardCreateSessionDefaults.ultimoSubtemaSelecionado!.trim();
+
+    if (!materias.contains(m)) return;
+
+    materiaSelecionada = m;
+    await carregarSubtemas(m);
+    if (!mounted) return;
+    subtemaSelecionado = s;
+    setState(() {});
+  }
+
   Future<void> _preencherDadosEdicao() async {
     final dados = widget.dados!;
 
     materiaSelecionada = (dados['materia'] ?? '').toString().trim();
-    temaSelecionado = (dados['tema'] ?? '').toString().trim();
     subtemaSelecionado = (dados['subtema'] ?? '').toString().trim();
 
     if (materiaSelecionada != null && materiaSelecionada!.isNotEmpty) {
-      await carregarTemas(materiaSelecionada!);
-    }
-
-    if (materiaSelecionada != null &&
-        temaSelecionado != null &&
-        temaSelecionado!.isNotEmpty) {
-      await carregarSubtemas(materiaSelecionada!, temaSelecionado!);
+      await carregarSubtemas(materiaSelecionada!);
     }
 
     await _carregarConteudoNoController(
@@ -230,6 +235,25 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
       (dados['explicacao'] ?? '').toString(),
     );
 
+    _imagemPerguntaLocal = flashcardMigrateImageFieldToStorageRef(
+      (dados['imagemPerguntaLocal'] ?? '').toString(),
+    );
+    _imagemRespostaLocal = flashcardMigrateImageFieldToStorageRef(
+      (dados['imagemRespostaLocal'] ?? '').toString(),
+    );
+    _imagemExplicacaoLocal = flashcardMigrateImageFieldToStorageRef(
+      (dados['imagemExplicacaoLocal'] ?? '').toString(),
+    );
+
+    if (_imagemPerguntaLocal.isEmpty) {
+      final legado = (dados['imagemLocal'] ?? '').toString().trim();
+      if (legado.isNotEmpty &&
+          !legado.contains('..') &&
+          !legado.toLowerCase().startsWith('http')) {
+        _imagemPerguntaLocal = flashcardMigrateImageFieldToStorageRef(legado);
+      }
+    }
+
     if (!mounted) return;
 
     setState(() {
@@ -237,49 +261,16 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
     });
   }
 
-  Future<void> carregarTemas(String materia) async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('flashcards')
-        .where('materia', isEqualTo: materia)
-        .get();
-
-    final set = <String>{};
-
-    for (final doc in snapshot.docs) {
-      final tema = (doc.data()['tema'] ?? '').toString().trim();
-      if (tema.isNotEmpty) {
-        set.add(tema);
-      }
-    }
+  Future<void> carregarSubtemas(String materia) async {
+    final lista =
+        await FlashcardSubtemaCatalogService.instance.fetchSubtemasByMateria(
+      materia,
+    );
 
     if (!mounted) return;
 
     setState(() {
-      temas = set.toList()..sort();
-      subtemas = [];
-    });
-  }
-
-  Future<void> carregarSubtemas(String materia, String tema) async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('flashcards')
-        .where('materia', isEqualTo: materia)
-        .where('tema', isEqualTo: tema)
-        .get();
-
-    final set = <String>{};
-
-    for (final doc in snapshot.docs) {
-      final subtema = (doc.data()['subtema'] ?? '').toString().trim();
-      if (subtema.isNotEmpty) {
-        set.add(subtema);
-      }
-    }
-
-    if (!mounted) return;
-
-    setState(() {
-      subtemas = set.toList()..sort();
+      subtemas = lista;
     });
   }
 
@@ -312,57 +303,6 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
                   materias.sort();
                 }
                 materiaSelecionada = valor;
-                temaSelecionado = null;
-                subtemaSelecionado = null;
-                temas = [];
-                subtemas = [];
-              });
-
-              Navigator.pop(context);
-            },
-            child: const Text("Salvar"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void mostrarDialogNovoTema() {
-    if (materiaSelecionada == null || materiaSelecionada!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecione a matéria primeiro')),
-      );
-      return;
-    }
-
-    final controller = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Novo Tema"),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            hintText: 'Digite o nome do tema',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancelar"),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final valor = controller.text.trim();
-              if (valor.isEmpty) return;
-
-              setState(() {
-                if (!temas.contains(valor)) {
-                  temas.add(valor);
-                  temas.sort();
-                }
-                temaSelecionado = valor;
                 subtemaSelecionado = null;
                 subtemas = [];
               });
@@ -377,12 +317,9 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
   }
 
   void mostrarDialogNovoSubtema() {
-    if (materiaSelecionada == null ||
-        materiaSelecionada!.isEmpty ||
-        temaSelecionado == null ||
-        temaSelecionado!.isEmpty) {
+    if (materiaSelecionada == null || materiaSelecionada!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecione matéria e tema primeiro')),
+        const SnackBar(content: Text('Selecione a matéria primeiro')),
       );
       return;
     }
@@ -410,10 +347,10 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
               if (valor.isEmpty) return;
 
               setState(() {
-                if (!subtemas.contains(valor)) {
-                  subtemas.add(valor);
-                  subtemas.sort();
-                }
+                subtemas = ContentHierarchyUtils.sortAlphabetically({
+                  ...subtemas,
+                  valor,
+                });
                 subtemaSelecionado = valor;
               });
 
@@ -426,12 +363,109 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
     );
   }
 
+  Future<void> _escolherImagemCard(_SlotImagemCard slot) async {
+    final FilePickerResult? resultado = kIsWeb
+        ? await FilePicker.platform.pickFiles(
+            type: FileType.image,
+            allowMultiple: false,
+            withData: true,
+          )
+        : await FilePicker.platform.pickFiles(
+            type: FileType.custom,
+            allowedExtensions: kExtensoesImagemCardPicker,
+            allowMultiple: false,
+            withData: false,
+          );
+
+    if (resultado == null || resultado.files.isEmpty) return;
+
+    final f = resultado.files.first;
+    var nome = f.name.trim();
+    if (nome.isEmpty && f.path != null && f.path!.trim().isNotEmpty) {
+      nome = f.path!.trim().replaceAll(r'\', '/').split('/').last;
+    }
+    nome = flashcardSanitizeBareFilename(
+      nome.replaceAll(r'\', '/').split('/').last,
+    );
+    if (nome.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nome de arquivo inválido. Escolha outra imagem.'),
+        ),
+      );
+      return;
+    }
+
+    final ref =
+        FirebaseStorage.instance.ref('$kFlashcardStorageRootSegment/$nome');
+
+    if (!mounted) return;
+    setState(() {
+      _enviandoImagemCard = true;
+    });
+
+    try {
+      await uploadFlashcardPickedFile(ref, f);
+      final storageRef =
+          flashcardMigrateImageFieldToStorageRef(nome); // imagenscard/nome
+
+      if (!mounted) return;
+      setState(() {
+        switch (slot) {
+          case _SlotImagemCard.pergunta:
+            _imagemPerguntaLocal = storageRef;
+            break;
+          case _SlotImagemCard.resposta:
+            _imagemRespostaLocal = storageRef;
+            break;
+          case _SlotImagemCard.explicacao:
+            _imagemExplicacaoLocal = storageRef;
+            break;
+        }
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Imagem enviada para Firebase Storage: $storageRef',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Falha ao enviar imagem: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _enviandoImagemCard = false;
+        });
+      }
+    }
+  }
+
+  Widget _previewImagemSlot(_SlotImagemCard slot, String nome) {
+    if (nome.isEmpty) return const SizedBox.shrink();
+    switch (slot) {
+      case _SlotImagemCard.pergunta:
+        return buildImagemPergunta(nome, height: 140);
+      case _SlotImagemCard.resposta:
+        return buildImagemResposta(nome, height: 140);
+      case _SlotImagemCard.explicacao:
+        return buildImagemExplicacao(nome, height: 140);
+    }
+  }
+
   Widget _buildEditorCard({
     required String titulo,
+    required _SlotImagemCard slotImagem,
+    required String imagemNomeArquivo,
     required quill.QuillController controller,
     required FocusNode focusNode,
     required ScrollController scrollController,
-    required String campo,
     double altura = 220,
   }) {
     return Container(
@@ -455,7 +489,8 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
           const SizedBox(height: 10),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            child: Wrap(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 quill.QuillToolbarHistoryButton(
                   controller: controller,
@@ -499,19 +534,45 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
                 quill.QuillToolbarLinkStyleButton(
                   controller: controller,
                 ),
+                quill.QuillToolbarSelectAlignmentButton(
+                  controller: controller,
+                ),
+                quill.QuillToolbarToggleStyleButton(
+                  controller: controller,
+                  attribute: quill.Attribute.strikeThrough,
+                ),
+                quill.QuillToolbarIndentButton(
+                  controller: controller,
+                  isIncrease: true,
+                ),
+                quill.QuillToolbarIndentButton(
+                  controller: controller,
+                  isIncrease: false,
+                ),
                 IconButton(
-                  tooltip: 'Inserir imagem',
-                              onPressed: _enviandoImagem
-                                  ? null
-                                  : () => _inserirImagemNoEditor(controller, campo),
-                  icon: const Icon(
-                    Icons.image_outlined,
-                    color: Color(0xFF1E3A8A),
-                  ),
+                  tooltip:
+                      'Enviar imagem para Firebase Storage ($kFlashcardStorageRootSegment/)',
+                  onPressed: _enviandoImagemCard
+                      ? null
+                      : () => _escolherImagemCard(slotImagem),
+                  icon: _enviandoImagemCard
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(
+                          Icons.add_photo_alternate_outlined,
+                          color: Color(0xFF1E3A8A),
+                        ),
                 ),
               ],
             ),
           ),
+          if (imagemNomeArquivo.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Center(child: _previewImagemSlot(slotImagem, imagemNomeArquivo)),
+          ],
           const SizedBox(height: 12),
           Container(
             height: altura,
@@ -529,8 +590,16 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
                 expands: false,
                 placeholder: 'Digite o conteúdo de $titulo...',
                 embedBuilders: kIsWeb
-                    ? FlutterQuillEmbeds.editorWebBuilders()
-                    : FlutterQuillEmbeds.editorBuilders(),
+                    ? FlutterQuillEmbeds.editorWebBuilders(
+                        imageEmbedConfig:
+                            FlashcardReadonlyQuill.kQuillImageEmbedConfig,
+                        videoEmbedConfig: null,
+                      )
+                    : FlutterQuillEmbeds.editorBuilders(
+                        imageEmbedConfig:
+                            FlashcardReadonlyQuill.kQuillImageEmbedConfig,
+                        videoEmbedConfig: null,
+                      ),
               ),
             ),
           ),
@@ -539,173 +608,8 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
     );
   }
 
-  Future<void> _inserirImagemNoEditor(
-    quill.QuillController controller,
-    String campo,
-  ) async {
-    // #region agent log
-    await _debugLog(
-      hypothesisId: 'H1',
-      location: 'criar_flashcard_page.dart:457',
-      message: 'inserirImagem:start',
-      data: {'campo': campo},
-    );
-    // #endregion
-
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      allowMultiple: false,
-    );
-
-    if (result == null || result.files.isEmpty) return;
-    if (!mounted) return;
-
-    final pickedFile = result.files.single;
-    final bytes = pickedFile.bytes ??
-        (pickedFile.path != null ? await File(pickedFile.path!).readAsBytes() : null);
-    if (bytes == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Não foi possível carregar a imagem.')),
-      );
-      return;
-    }
-
-    final nomeOriginal = pickedFile.name;
-    final extensao = nomeOriginal.contains('.')
-        ? nomeOriginal.split('.').last.toLowerCase()
-        : 'jpg';
-
-    // HEIC/HEIF frequentemente não renderiza em `Image.network` no Android.
-    // Mantemos apenas formatos amplamente suportados para garantir preview no app.
-    final validExtensions = ['jpg', 'jpeg', 'png'];
-
-    if (!validExtensions.contains(extensao)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Por favor, selecione uma imagem em formato JPG, JPEG ou PNG',
-          ),
-          duration: Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
-
-    final nomeArquivo =
-        '${campo}_${DateTime.now().millisecondsSinceEpoch}.${extensao.isEmpty ? 'jpg' : extensao}';
-    // #region agent log
-    await _debugLog(
-      hypothesisId: 'H1',
-      location: 'criar_flashcard_page.dart:468',
-      message: 'inserirImagem:beforeUpload',
-      data: {
-        'campo': campo,
-        'fileName': nomeOriginal,
-        'nomeArquivo': nomeArquivo,
-        'bytesLength': bytes.length,
-      },
-    );
-    // #endregion
-
-    try {
-      if (mounted) {
-        setState(() {
-          _enviandoImagem = true;
-        });
-        final messenger = ScaffoldMessenger.of(context);
-        messenger.hideCurrentSnackBar();
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Enviando imagem...')),
-        );
-      }
-
-      final contentType = switch (extensao) {
-        'png' => 'image/png',
-        'jpg' || 'jpeg' => 'image/jpeg',
-        _ => 'application/octet-stream',
-      };
-      final url = await firebaseService
-          .uploadImagem(
-            bytes,
-            nomeArquivo,
-            contentType: contentType,
-          )
-          // Evita ficar preso no "carregando" sem retorno.
-          .timeout(const Duration(seconds: 35));
-      if (url == null || url.trim().isEmpty) {
-        throw Exception('Upload não retornou URL.');
-      }
-
-      final selection = controller.selection;
-      final index = selection.baseOffset >= 0
-          ? selection.baseOffset
-          : controller.document.length;
-
-      // Coloca a imagem "centralizada" (em bloco) entre quebras de linha,
-      // para ficar visível e permitir digitar antes/depois.
-      controller.replaceText(
-        index,
-        0,
-        '\n',
-        TextSelection.collapsed(offset: index + 1),
-      );
-      controller.replaceText(
-        index + 1,
-        0,
-        quill.BlockEmbed.image(url),
-        TextSelection.collapsed(offset: index + 2),
-      );
-      controller.replaceText(
-        index + 2,
-        0,
-        '\n',
-        TextSelection.collapsed(offset: index + 3),
-      );
-      controller.updateSelection(
-        TextSelection.collapsed(offset: index + 3),
-        quill.ChangeSource.local,
-      );
-
-      if (mounted) {
-        final messenger = ScaffoldMessenger.of(context);
-        messenger.hideCurrentSnackBar();
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Imagem inserida com sucesso!')),
-        );
-      }
-    } catch (e) {
-      // #region agent log
-      await _debugLog(
-        hypothesisId: 'H1',
-        location: 'criar_flashcard_page.dart:493',
-        message: 'inserirImagem:error',
-        data: {'campo': campo, 'error': e.toString()},
-      );
-      // #endregion
-      if (!mounted) return;
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Erro ao enviar/inserir imagem: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _enviandoImagem = false;
-        });
-      }
-    }
-  }
-
-  Future<String> _getConteudoParaSalvar(
-    quill.QuillController controller,
-    {bool preservarFormatacao = false}
-  ) async {
+  Future<String> _getConteudoParaSalvar(quill.QuillController controller,
+      {bool preservarFormatacao = false}) async {
     if (preservarFormatacao) {
       return jsonEncode(controller.document.toDelta().toJson());
     }
@@ -742,14 +646,12 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
     );
     final perguntaTextoPlano = _getTextoPlano(perguntaController);
     final respostaTextoPlano = _getTextoPlano(respostaController);
-    // #region agent log
     await _debugLog(
       hypothesisId: 'H3',
-      location: 'criar_flashcard_page.dart:522',
+      location: 'criar_flashcard_page.dart:salvarCard',
       message: 'salvarCard:collectedInputs',
       data: {
         'materia': materiaSelecionada,
-        'tema': temaSelecionado,
         'subtema': subtemaSelecionado,
         'perguntaLen': pergunta.length,
         'respostaLen': resposta.length,
@@ -758,17 +660,14 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
         'respostaTextoPlanoLen': respostaTextoPlano.length,
       },
     );
-    // #endregion
 
     if (materiaSelecionada == null ||
         materiaSelecionada!.trim().isEmpty ||
-        temaSelecionado == null ||
-        temaSelecionado!.trim().isEmpty ||
         subtemaSelecionado == null ||
         subtemaSelecionado!.trim().isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Preencha matéria, tema e subtema")),
+        const SnackBar(content: Text('Preencha matéria e subtema')),
       );
       return;
     }
@@ -786,44 +685,58 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
     });
 
     try {
-      // #region agent log
       await _debugLog(
         hypothesisId: 'H4',
-        location: 'criar_flashcard_page.dart:548',
+        location: 'criar_flashcard_page.dart:salvarCard',
         message: 'salvarCard:beforePersist',
         data: {'modoEdicao': modoEdicao, 'cardId': widget.cardId},
       );
-      // #endregion
+      final imagemPerguntaLocal = flashcardMigrateImageFieldToStorageRef(
+        _imagemPerguntaLocal.trim(),
+      );
+      final imagemRespostaLocal = flashcardMigrateImageFieldToStorageRef(
+        _imagemRespostaLocal.trim(),
+      );
+      final imagemExplicacaoLocal = flashcardMigrateImageFieldToStorageRef(
+        _imagemExplicacaoLocal.trim(),
+      );
       if (modoEdicao) {
         await firebaseService.atualizarCard(
           cardId: widget.cardId!,
           materia: materiaSelecionada!.trim(),
-          tema: temaSelecionado!.trim(),
           subtema: subtemaSelecionado!.trim(),
           pergunta: pergunta,
           resposta: resposta,
           explicacao: explicacao,
+          imagemPerguntaLocal: imagemPerguntaLocal,
+          imagemRespostaLocal: imagemRespostaLocal,
+          imagemExplicacaoLocal: imagemExplicacaoLocal,
         );
       } else {
         await firebaseService.adicionarCard(
           materia: materiaSelecionada!.trim(),
-          tema: temaSelecionado!.trim(),
           subtema: subtemaSelecionado!.trim(),
           pergunta: pergunta,
           resposta: resposta,
           explicacao: explicacao,
+          imagemPerguntaLocal: imagemPerguntaLocal,
+          imagemRespostaLocal: imagemRespostaLocal,
+          imagemExplicacaoLocal: imagemExplicacaoLocal,
         );
       }
-      // #region agent log
       await _debugLog(
         hypothesisId: 'H4',
-        location: 'criar_flashcard_page.dart:569',
+        location: 'criar_flashcard_page.dart:salvarCard',
         message: 'salvarCard:afterPersist',
         data: {'modoEdicao': modoEdicao},
       );
-      // #endregion
 
       if (!mounted) return;
+
+      FlashcardCreateSessionDefaults.setFromForm(
+        materiaSelecionada!.trim(),
+        subtemaSelecionado!.trim(),
+      );
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -837,14 +750,12 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
 
       Navigator.pop(context, true);
     } catch (e) {
-      // #region agent log
       await _debugLog(
         hypothesisId: 'H4',
-        location: 'criar_flashcard_page.dart:583',
+        location: 'criar_flashcard_page.dart:salvarCard',
         message: 'salvarCard:error',
         data: {'error': e.toString()},
       );
-      // #endregion
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -867,6 +778,26 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
         title: Text(modoEdicao ? "Editar Flashcard" : "Criar Flashcard"),
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
+        actions: [
+          if (!modoEdicao)
+            IconButton(
+              tooltip: 'Limpar assunto padrão da sessão',
+              icon: const Icon(Icons.restart_alt_rounded),
+              onPressed: () {
+                FlashcardCreateSessionDefaults.clear();
+                setState(() {
+                  materiaSelecionada = null;
+                  subtemaSelecionado = null;
+                  subtemas = [];
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Seleção padrão da sessão limpa.'),
+                  ),
+                );
+              },
+            ),
+        ],
       ),
       body: carregando
           ? const Center(child: CircularProgressIndicator())
@@ -876,7 +807,12 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   DropdownButtonFormField<String>(
-                    initialValue: materiaSelecionada,
+                    key: ValueKey<String>(
+                      'fc_dd_materia_${materias.length}_${materiaSelecionada ?? ''}',
+                    ),
+                    initialValue: materias.contains(materiaSelecionada)
+                        ? materiaSelecionada
+                        : null,
                     decoration: _decoracaoCampo("Matéria"),
                     items: [
                       ...materias.map(
@@ -898,104 +834,61 @@ class _CriarFlashcardPageState extends State<CriarFlashcardPage> {
 
                       setState(() {
                         materiaSelecionada = value;
-                        temaSelecionado = null;
                         subtemaSelecionado = null;
-                        temas = [];
                         subtemas = [];
                       });
 
                       if (value != null && value.isNotEmpty) {
-                        await carregarTemas(value);
+                        await carregarSubtemas(value);
                       }
                     },
                   ),
                   const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    initialValue: temaSelecionado,
-                    decoration: _decoracaoCampo("Tema"),
-                    items: [
-                      ...temas.map(
-                        (t) => DropdownMenuItem(
-                          value: t,
-                          child: Text(t),
-                        ),
-                      ),
-                      const DropdownMenuItem(
-                        value: "__novo_tema__",
-                        child: Text("➕ Novo Tema"),
-                      ),
-                    ],
-                    onChanged: (value) async {
-                      if (value == "__novo_tema__") {
-                        mostrarDialogNovoTema();
-                        return;
-                      }
-
-                      setState(() {
-                        temaSelecionado = value;
-                        subtemaSelecionado = null;
-                        subtemas = [];
-                      });
-
-                      if (materiaSelecionada != null &&
-                          value != null &&
-                          value.isNotEmpty) {
-                        await carregarSubtemas(materiaSelecionada!, value);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    initialValue: subtemaSelecionado,
-                    decoration: _decoracaoCampo("Subtema"),
-                    items: [
-                      ...subtemas.map(
-                        (s) => DropdownMenuItem(
-                          value: s,
-                          child: Text(s),
-                        ),
-                      ),
-                      const DropdownMenuItem(
-                        value: "__novo_subtema__",
-                        child: Text("➕ Novo Subtema"),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      if (value == "__novo_subtema__") {
-                        mostrarDialogNovoSubtema();
-                        return;
-                      }
-
-                      setState(() {
-                        subtemaSelecionado = value;
-                      });
-                    },
-                  ),
+                  if (materiaSelecionada != null &&
+                      materiaSelecionada!.isNotEmpty)
+                    SubtemaSearchField(
+                      key: ValueKey(
+                          'fc_sub_${materiaSelecionada}_${subtemas.length}'),
+                      subtemas: subtemas,
+                      selectedSubtema: subtemaSelecionado,
+                      enabled: !salvando,
+                      onCreateNew: mostrarDialogNovoSubtema,
+                      onSelected: (value) {
+                        setState(() {
+                          subtemaSelecionado = value?.trim().isEmpty == true
+                              ? null
+                              : value?.trim();
+                        });
+                      },
+                    ),
                   const SizedBox(height: 20),
                   _buildEditorCard(
                     titulo: "Pergunta",
+                    slotImagem: _SlotImagemCard.pergunta,
+                    imagemNomeArquivo: _imagemPerguntaLocal,
                     controller: perguntaController,
                     focusNode: perguntaFocusNode,
                     scrollController: perguntaScrollController,
-                    campo: "pergunta",
                     altura: 240,
                   ),
                   const SizedBox(height: 16),
                   _buildEditorCard(
                     titulo: "Resposta",
+                    slotImagem: _SlotImagemCard.resposta,
+                    imagemNomeArquivo: _imagemRespostaLocal,
                     controller: respostaController,
                     focusNode: respostaFocusNode,
                     scrollController: respostaScrollController,
-                    campo: "resposta",
                     altura: 240,
                   ),
                   const SizedBox(height: 16),
                   _buildEditorCard(
                     titulo: "Explicação",
+                    slotImagem: _SlotImagemCard.explicacao,
+                    imagemNomeArquivo: _imagemExplicacaoLocal,
                     controller: explicacaoController,
                     focusNode: explicacaoFocusNode,
                     scrollController: explicacaoScrollController,
-                    campo: "explicacao",
                     altura: 260,
                   ),
                   const SizedBox(height: 24),

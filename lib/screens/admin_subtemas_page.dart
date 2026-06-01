@@ -1,15 +1,15 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/services/firebase_service.dart';
+import 'package:flutter_application_1/utils/content_hierarchy_utils.dart';
 import 'admin_cards_page.dart';
 
 class AdminSubtemasPage extends StatefulWidget {
   final String materia;
-  final String tema;
 
   const AdminSubtemasPage({
     super.key,
     required this.materia,
-    required this.tema,
   });
 
   @override
@@ -17,6 +17,7 @@ class AdminSubtemasPage extends StatefulWidget {
 }
 
 class _AdminSubtemasPageState extends State<AdminSubtemasPage> {
+  final FirebaseService _firebaseService = FirebaseService();
   Map<String, int> _agruparSubtemas(List<QueryDocumentSnapshot> docs) {
     final Map<String, int> mapa = {};
 
@@ -71,7 +72,6 @@ class _AdminSubtemasPageState extends State<AdminSubtemasPage> {
       final query = await FirebaseFirestore.instance
           .collection('flashcards')
           .where('materia', isEqualTo: widget.materia)
-          .where('tema', isEqualTo: widget.tema)
           .where('subtema', isEqualTo: subtemaAtual)
           .get();
 
@@ -129,26 +129,20 @@ class _AdminSubtemasPageState extends State<AdminSubtemasPage> {
     if (confirmar != true) return;
 
     try {
-      final query = await FirebaseFirestore.instance
-          .collection('flashcards')
-          .where('materia', isEqualTo: widget.materia)
-          .where('tema', isEqualTo: widget.tema)
-          .where('subtema', isEqualTo: subtema)
-          .get();
-
-      final batch = FirebaseFirestore.instance.batch();
-
-      for (final doc in query.docs) {
-        batch.delete(doc.reference);
-      }
-
-      await batch.commit();
+      final n = await _firebaseService.excluirFlashcardsPorFiltro(
+        materia: widget.materia,
+        subtema: subtema,
+      );
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Subtema "$subtema" excluído com sucesso'),
+          content: Text(
+            n == 0
+                ? 'Nenhum flashcard encontrado para esse subtema.'
+                : 'Subtema "$subtema" excluído ($n flashcard(s)).',
+          ),
         ),
       );
     } catch (e) {
@@ -169,7 +163,6 @@ class _AdminSubtemasPageState extends State<AdminSubtemasPage> {
       MaterialPageRoute(
         builder: (_) => AdminCardsPage(
           materia: widget.materia,
-          tema: widget.tema,
           subtema: subtema,
         ),
       ),
@@ -181,7 +174,7 @@ class _AdminSubtemasPageState extends State<AdminSubtemasPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4F8),
       appBar: AppBar(
-        title: Text('Subtemas - ${widget.tema}'),
+        title: Text('Subtemas - ${widget.materia}'),
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
       ),
@@ -189,7 +182,6 @@ class _AdminSubtemasPageState extends State<AdminSubtemasPage> {
         stream: FirebaseFirestore.instance
             .collection('flashcards')
             .where('materia', isEqualTo: widget.materia)
-            .where('tema', isEqualTo: widget.tema)
             .snapshots(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
@@ -198,11 +190,12 @@ class _AdminSubtemasPageState extends State<AdminSubtemasPage> {
 
           final docs = snapshot.data!.docs;
           final subtemasMap = _agruparSubtemas(docs);
-          final subtemas = subtemasMap.keys.toList()..sort();
+          final subtemas =
+              ContentHierarchyUtils.sortAlphabetically(subtemasMap.keys);
 
           if (subtemas.isEmpty) {
             return const Center(
-              child: Text("Nenhum subtema cadastrado neste tema"),
+              child: Text('Nenhum subtema cadastrado nesta matéria'),
             );
           }
 

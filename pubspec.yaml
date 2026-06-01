@@ -15,19 +15,29 @@ dependencies:
 
   file_picker: ^10.1.7
   path: ^1.9.0
+  path_provider: ^2.1.5
   universal_html: ^2.2.4
   cupertino_icons: ^1.0.8
   local_auth: ^3.0.1
   firebase_core: ^4.7.0
+  firebase_app_check: ^0.4.3
   firebase_auth: ^6.4.0
+  firebase_analytics: ^12.0.0
+  firebase_messaging: ^16.0.4
+  flutter_local_notifications: ^19.5.0
+  firebase_storage: ^13.0.0
   url_launcher: ^6.3.1
   shared_preferences: ^2.5.4
   flutter_secure_storage: ^9.2.4
   connectivity_plus: ^7.0.0
   http: ^1.6.0
   cloud_firestore: ^6.3.0
-  firebase_storage: ^13.3.0
+  cloud_functions: ^6.0.6
+  cached_network_image: ^3.4.1
   image_picker: ^1.1.2
+  package_info_plus: ^8.3.0
+  share_plus: ^11.0.0
+  crypto: ^3.0.6
 
   # 🔥 Editor rico (VERSÕES COMPATÍVEIS)
   flutter_quill: 11.5.0

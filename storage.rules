@@ -1,0 +1,66 @@
+rules_version = '2';
+
+// App Check: o SDK Flutter envia token quando App Check está ativo no app.
+// Enforcement adicional é feita no Firebase Console (Storage → App Check).
+// Quando Enforced, clientes sem token válido falham antes destas rules.
+// request.app fica disponível para defesa em profundidade (opcional):
+//   function appCheckPresent() { return request.app != null; }
+// Não exigimos request.app nas rules para não quebrar dev sem token registrado.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isFounder() {
+      return isSignedIn()
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() == 'marciohgmm@gmail.com';
+    }
+
+    function isListedAdmin() {
+      return isSignedIn()
+        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return isFounder() || isListedAdmin();
+    }
+
+    function isAppAdmin() {
+      return isAdmin() || (
+        isSignedIn()
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.isAdmin == true
+      );
+    }
+
+    function isOsceCaseEditor() {
+      return isAppAdmin();
+    }
+
+    match /practical_phase/{modelId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isAppAdmin()
+        && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    match /imagenscard/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /flashcards/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /osce_cases/{caseId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isOsceCaseEditor()
+        && request.resource.size < 10 * 1024 * 1024;
+    }
+  }
+}

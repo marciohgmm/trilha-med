@@ -19,18 +19,21 @@ String _normalizarConteudoRichText(dynamic conteudo) {
             : null;
 
     if (ops is List) {
-      return ops.map((item) {
-        if (item is Map<String, dynamic>) {
-          final insert = item['insert'];
-          if (insert is String) {
-            return insert;
-          }
-          if (insert is Map<String, dynamic> && insert['image'] != null) {
-            return '[Imagem]';
-          }
-        }
-        return item.toString();
-      }).join().trim();
+      return ops
+          .map((item) {
+            if (item is Map<String, dynamic>) {
+              final insert = item['insert'];
+              if (insert is String) {
+                return insert;
+              }
+              if (insert is Map<String, dynamic> && insert['image'] != null) {
+                return '[Imagem]';
+              }
+            }
+            return item.toString();
+          })
+          .join()
+          .trim();
     }
   } catch (_) {
     // não é Delta JSON, cai para texto simples
@@ -136,7 +139,9 @@ class AdminNotificacoesPage extends StatelessWidget {
               final subtema = (data['subtema'] ?? '').toString();
               final indiceCard = (data['indiceCard'] ?? '').toString();
               final totalCards = (data['totalCardsSubtema'] ?? '').toString();
-              final pergunta = _normalizarConteudoRichText(data['pergunta']);
+              final pergunta = _normalizarConteudoRichText(
+                data['pergunta'] ?? data['enunciado'] ?? '',
+              );
 
               return Card(
                 elevation: 3,
@@ -161,7 +166,8 @@ class AdminNotificacoesPage extends StatelessWidget {
                                 vertical: 6,
                               ),
                               decoration: BoxDecoration(
-                                color: _corStatus(status).withValues(alpha: 0.12),
+                                color:
+                                    _corStatus(status).withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
@@ -242,7 +248,9 @@ class AdminNotificacoesPage extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          mensagem.isEmpty ? 'Sem mensagem informada.' : mensagem,
+                          mensagem.isEmpty
+                              ? 'Sem mensagem informada.'
+                              : mensagem,
                           style: const TextStyle(fontSize: 15),
                         ),
                         const SizedBox(height: 10),
@@ -284,7 +292,9 @@ class AdminNotificacaoDetalhePage extends StatelessWidget {
     final tema = (data['tema'] ?? '').toString();
     final subtema = (data['subtema'] ?? '').toString();
     final userId = (data['userId'] ?? '').toString();
-    final pergunta = _normalizarConteudoRichText(data['pergunta']);
+    final pergunta = _normalizarConteudoRichText(
+      data['pergunta'] ?? data['enunciado'] ?? '',
+    );
     final resposta = _normalizarConteudoRichText(data['resposta']);
     final explicacao = _normalizarConteudoRichText(data['explicacao']);
     final indiceCard = (data['indiceCard'] ?? '').toString();
@@ -326,7 +336,14 @@ class AdminNotificacaoDetalhePage extends StatelessWidget {
           _SecaoDetalhe(titulo: 'Resposta', conteudo: resposta),
           _SecaoDetalhe(titulo: 'Explicação', conteudo: explicacao),
           if (podeEditarQuestao)
-            _SecaoDetalhe(titulo: 'Enunciado (questão)', conteudo: enunciadoQuestao),
+            _SecaoDetalhe(
+                titulo: 'Enunciado (questão)', conteudo: enunciadoQuestao),
+          if (tipo == 'erro_questao' &&
+              (data['alternativasResumo'] ?? '').toString().trim().isNotEmpty)
+            _SecaoDetalhe(
+              titulo: 'Alternativas (resumo)',
+              conteudo: (data['alternativasResumo'] ?? '').toString(),
+            ),
           _SecaoDetalhe(titulo: 'Mensagem do aluno', conteudo: mensagem),
           const SizedBox(height: 24),
           if (podeEditarCard) ...[
@@ -370,7 +387,8 @@ class AdminNotificacaoDetalhePage extends StatelessWidget {
           if (podeEditarQuestao) ...[
             ElevatedButton.icon(
               onPressed: () async {
-                final questao = await QuestaoService().getQuestaoPorId(questaoId);
+                final questao =
+                    await QuestaoService().getQuestaoPorId(questaoId);
                 if (!context.mounted) return;
 
                 if (questao == null) {

@@ -2,16 +2,22 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_application_1/services/flashcard_materia_stats_service.dart';
+import 'package:flutter_application_1/services/flashcard_subtema_catalog_service.dart';
+import 'package:flutter_application_1/utils/content_hierarchy_utils.dart';
+import 'package:flutter_application_1/utils/image_helper.dart';
 import 'package:http/http.dart' as http;
-import 'package:path/path.dart' as p;
 import 'package:universal_html/html.dart' as html;
 
 /// Serviço que abstrai todas as operações de cards e arquivos.
 class FirebaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FlashcardMateriaStatsService _materiaStats =
+      FlashcardMateriaStatsService.instance;
+  final FlashcardSubtemaCatalogService _subtemaCatalog =
+      FlashcardSubtemaCatalogService.instance;
 
   Future<void> _debugLog({
     required String hypothesisId,
@@ -50,6 +56,31 @@ class FirebaseService {
         'debug-f07c83.log',
       ).writeAsString('${jsonEncode(payload)}\n', mode: FileMode.append);
     } catch (_) {}
+  }
+
+  int _parseOrdemEstudo(dynamic raw) {
+    if (raw == null) return 0;
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    return int.tryParse(raw.toString()) ?? 0;
+  }
+
+  /// Próximo [ordemEstudo] para o par matéria/subtema (max existente + 1).
+  Future<int> _proximaOrdemEstudoParaSubtema(
+    String materia,
+    String subtema,
+  ) async {
+    final snap = await _db
+        .collection('flashcards')
+        .where('materia', isEqualTo: materia)
+        .where('subtema', isEqualTo: subtema)
+        .get();
+    var max = 0;
+    for (final doc in snap.docs) {
+      final n = _parseOrdemEstudo(doc.data()['ordemEstudo']);
+      if (n > max) max = n;
+    }
+    return max + 1;
   }
 
   Set<String> _gerarSearchTerms(List<String> textos) {
@@ -97,19 +128,22 @@ class FirebaseService {
   // FLASHCARDS: CRUD
   // ========================================================================
 
-  /// Cria um novo flashcard, com ou sem imagem.
+  /// Cria um novo flashcard (imagens locais: só nome do arquivo em [imagem*Local]).
   Future<void> adicionarCard({
     required String materia,
-    required String tema,
     required String subtema,
     required String pergunta,
     required String resposta,
     String? explicacao,
-    Uint8List? imagemPergunta,
-    Uint8List? imagemResposta,
+    String? imagemPerguntaLocal,
+    String? imagemRespostaLocal,
+    String? imagemExplicacaoLocal,
     String dificuldade = "medio",
   }) async {
     try {
+      final imgP = imagemPerguntaLocal?.trim() ?? '';
+      final imgR = imagemRespostaLocal?.trim() ?? '';
+      final imgE = imagemExplicacaoLocal?.trim() ?? '';
       // #region agent log
       await _debugLog(
         hypothesisId: 'H4',
@@ -117,60 +151,45 @@ class FirebaseService {
         message: 'adicionarCard:start',
         data: {
           'materia': materia,
-          'tema': tema,
           'subtema': subtema,
           'perguntaLen': pergunta.length,
           'respostaLen': resposta.length,
-          'hasImagemPergunta': imagemPergunta != null,
-          'hasImagemResposta': imagemResposta != null,
+          'imagemPerguntaLocalLen': imgP.length,
         },
       );
       // #endregion
       final docRef = _db.collection('flashcards').doc();
 
-      String? urlPergunta;
-      String? urlResposta;
-
-      // Envia imagem da pergunta, se existir (como Uint8List).
-      if (imagemPergunta != null) {
-        urlPergunta = await uploadImagem(
-          imagemPergunta,
-          'pergunta_${docRef.id}${p.extension('_imagemPergunta_').isEmpty ? '.jpg' : p.extension('_imagemPergunta_')}',
-        );
-      }
-
-      // Envia imagem da resposta, se existir (como Uint8List).
-      if (imagemResposta != null) {
-        urlResposta = await uploadImagem(
-          imagemResposta,
-          'resposta_${docRef.id}${p.extension('_imagemResposta_').isEmpty ? '.jpg' : p.extension('_imagemResposta_')}',
-        );
-      }
-
       final searchTerms = _gerarSearchTerms([
         materia,
-        tema,
         subtema,
         pergunta,
         resposta,
         explicacao ?? '',
       ]);
 
+      final ordemEstudo =
+          await _proximaOrdemEstudoParaSubtema(materia, subtema);
+
       await docRef.set({
         'id': docRef.id,
         'materia': materia,
-        'tema': tema,
+        'tema': '',
         'subtema': subtema,
         'pergunta': pergunta,
         'resposta': resposta,
         'explicacao': explicacao ?? '',
-        'imagemPergunta': urlPergunta ?? '',
-        'imagemResposta': urlResposta ?? '',
+        'imagemPerguntaLocal': imgP,
+        'imagemRespostaLocal': imgR,
+        'imagemExplicacaoLocal': imgE,
         'dificuldade': dificuldade,
+        'ordemEstudo': ordemEstudo,
         'searchTerms': searchTerms.toList(),
         'createdAt': Timestamp.now(),
         'updatedAt': Timestamp.now(),
       });
+      await _materiaStats.incrementMateria(materia);
+      await _subtemaCatalog.registerCard(materia, subtema);
       // #region agent log
       await _debugLog(
         hypothesisId: 'H4',
@@ -192,89 +211,97 @@ class FirebaseService {
     }
   }
 
-  /// Atualiza um flashcard já existente (incluindo substituição de imagens).
+  /// Atribui [ordemEstudo] = 1..n na ordem visual desejada (mesmo subtema).
+  Future<void> reordenarFlashcardsNoSubtema({
+    required String materia,
+    required String subtema,
+    required List<String> orderedCardIds,
+  }) async {
+    if (orderedCardIds.isEmpty) return;
+    const chunk = 400;
+    for (var i = 0; i < orderedCardIds.length; i += chunk) {
+      final batch = _db.batch();
+      final end = i + chunk > orderedCardIds.length ? orderedCardIds.length : i + chunk;
+      for (var j = i; j < end; j++) {
+        final id = orderedCardIds[j];
+        batch.update(_db.collection('flashcards').doc(id), {
+          'ordemEstudo': j + 1,
+          'updatedAt': Timestamp.now(),
+        });
+      }
+      await batch.commit();
+    }
+  }
+
+  /// Atualiza um flashcard já existente.
   Future<void> atualizarCard({
     required String cardId,
     required String materia,
-    required String tema,
     required String subtema,
     required String pergunta,
     required String resposta,
     String? explicacao,
-    Uint8List? novaImagemPergunta,
-    Uint8List? novaImagemResposta,
-    String? imagemPerguntaAtual,
-    String? imagemRespostaAtual,
+    String? imagemPerguntaLocal,
+    String? imagemRespostaLocal,
+    String? imagemExplicacaoLocal,
     String dificuldade = "medio",
   }) async {
     try {
-      String urlPergunta = imagemPerguntaAtual ?? '';
-      String urlResposta = imagemRespostaAtual ?? '';
-
-      if (novaImagemPergunta != null) {
-        urlPergunta = (await uploadImagem(
-          novaImagemPergunta,
-          'pergunta_$cardId${p.extension('_imagemPergunta_').isEmpty ? '.jpg' : p.extension('_imagemPergunta_')}',
-        )) ??
-            urlPergunta;
-      }
-
-      if (novaImagemResposta != null) {
-        urlResposta = (await uploadImagem(
-          novaImagemResposta,
-          'resposta_$cardId${p.extension('_imagemResposta_').isEmpty ? '.jpg' : p.extension('_imagemResposta_')}',
-        )) ??
-            urlResposta;
-      }
+      final imgP = imagemPerguntaLocal?.trim() ?? '';
+      final imgR = imagemRespostaLocal?.trim() ?? '';
+      final imgE = imagemExplicacaoLocal?.trim() ?? '';
 
       final searchTerms = _gerarSearchTerms([
         materia,
-        tema,
         subtema,
         pergunta,
         resposta,
         explicacao ?? '',
       ]);
 
+      final snap = await _db.collection('flashcards').doc(cardId).get();
+      final oldM = (snap.data()?['materia'] ?? '').toString().trim();
+      final oldS = (snap.data()?['subtema'] ?? '').toString().trim();
+
       await _db.collection('flashcards').doc(cardId).update({
         'materia': materia,
-        'tema': tema,
+        'tema': '',
         'subtema': subtema,
         'pergunta': pergunta,
         'resposta': resposta,
         'explicacao': explicacao ?? '',
-        'imagemPergunta': urlPergunta,
-        'imagemResposta': urlResposta,
+        'imagemPerguntaLocal': imgP,
+        'imagemRespostaLocal': imgR,
+        'imagemExplicacaoLocal': imgE,
         'dificuldade': dificuldade,
         'searchTerms': searchTerms.toList(),
         'updatedAt': Timestamp.now(),
       });
+      if (oldM != materia.trim() || oldS != subtema.trim()) {
+        if (oldM.isNotEmpty && oldS.isNotEmpty) {
+          await _subtemaCatalog.unregisterCard(oldM, oldS);
+        }
+        await _subtemaCatalog.registerCard(materia, subtema);
+      }
     } catch (e) {
       rethrow;
     }
   }
 
-  /// Exclui um card e suas imagens associadas no Storage.
+  /// Exclui um card no Firestore (imagens ficam nos assets do app).
   Future<void> excluirCard(String cardId) async {
     try {
-      final doc = await _db.collection('flashcards').doc(cardId).get();
-
-      if (doc.exists) {
-        final data = doc.data() as Map<String, dynamic>;
-
-        final imagemPergunta = (data['imagemPergunta'] ?? '').toString();
-        final imagemResposta = (data['imagemResposta'] ?? '').toString();
-
-        if (imagemPergunta.isNotEmpty) {
-          await _excluirArquivoStoragePorUrl(imagemPergunta);
-        }
-
-        if (imagemResposta.isNotEmpty) {
-          await _excluirArquivoStoragePorUrl(imagemResposta);
-        }
+      final ref = _db.collection('flashcards').doc(cardId);
+      final snap = await ref.get();
+      final materia = (snap.data()?['materia'] ?? '').toString().trim();
+      final subtema = (snap.data()?['subtema'] ?? '').toString().trim();
+      await ref.delete();
+      if (materia.isNotEmpty) {
+        await _materiaStats.decrementMateria(materia);
       }
-
-      await _db.collection('flashcards').doc(cardId).delete();
+      if (materia.isNotEmpty && subtema.isNotEmpty) {
+        await _subtemaCatalog.unregisterCard(materia, subtema);
+      }
     } catch (e) {
       rethrow;
     }
@@ -283,17 +310,107 @@ class FirebaseService {
   /// Exclui vários cards em lote (sem tratar imagens por enquanto).
   Future<void> excluirCardsEmLote(List<String> cardIds) async {
     try {
-      final batch = _db.batch();
-
-      for (final cardId in cardIds) {
-        final docRef = _db.collection('flashcards').doc(cardId);
-        batch.delete(docRef);
+      if (cardIds.isEmpty) return;
+      final counts = <String, int>{};
+      final pairCounts = <String, ({String materia, String subtema, int count})>{};
+      final refs = <DocumentReference<Map<String, dynamic>>>[];
+      for (final id in cardIds) {
+        final ref = _db.collection('flashcards').doc(id);
+        refs.add(ref);
+        final snap = await ref.get();
+        final m = (snap.data()?['materia'] ?? '').toString().trim();
+        final s = (snap.data()?['subtema'] ?? '').toString().trim();
+        if (m.isNotEmpty) {
+          counts[m] = (counts[m] ?? 0) + 1;
+        }
+        if (m.isNotEmpty && s.isNotEmpty) {
+          final key = ContentHierarchyUtils.subtemaPairKey(m, s);
+          final prev = pairCounts[key];
+          if (prev == null) {
+            pairCounts[key] = (materia: m, subtema: s, count: 1);
+          } else {
+            pairCounts[key] = (
+              materia: prev.materia,
+              subtema: prev.subtema,
+              count: prev.count + 1,
+            );
+          }
+        }
       }
-
-      await batch.commit();
+      await _commitDeletesEmLotes(refs);
+      for (final e in counts.entries) {
+        await _materiaStats.decrementMateria(e.key, by: e.value);
+      }
+      for (final e in pairCounts.values) {
+        await _subtemaCatalog.unregisterCard(
+          e.materia,
+          e.subtema,
+          by: e.count,
+        );
+      }
     } catch (e) {
       rethrow;
     }
+  }
+
+  /// Firestore aceita no máximo 500 operações por batch; acima disso o commit falha (ex.: `invalid-argument`).
+  Future<void> _commitDeletesEmLotes(
+    List<DocumentReference<Map<String, dynamic>>> refs,
+  ) async {
+    if (refs.isEmpty) return;
+    const chunk = 450;
+    for (var i = 0; i < refs.length; i += chunk) {
+      final batch = _db.batch();
+      final end = i + chunk > refs.length ? refs.length : i + chunk;
+      for (var j = i; j < end; j++) {
+        batch.delete(refs[j]);
+      }
+      await batch.commit();
+    }
+  }
+
+  /// Remove flashcards que batem no filtro (matéria obrigatória; subtema opcional).
+  Future<int> excluirFlashcardsPorFiltro({
+    required String materia,
+    String? subtema,
+  }) async {
+    Query<Map<String, dynamic>> q =
+        _db.collection('flashcards').where('materia', isEqualTo: materia);
+    if (subtema != null && subtema.isNotEmpty) {
+      q = q.where('subtema', isEqualTo: subtema);
+    }
+
+    final snap = await q.get();
+    if (snap.docs.isEmpty) return 0;
+
+    final pairCounts = <String, ({String materia, String subtema, int count})>{};
+    for (final doc in snap.docs) {
+      final m = (doc.data()['materia'] ?? '').toString().trim();
+      final s = (doc.data()['subtema'] ?? '').toString().trim();
+      if (m.isEmpty || s.isEmpty) continue;
+      final key = ContentHierarchyUtils.subtemaPairKey(m, s);
+      final prev = pairCounts[key];
+      if (prev == null) {
+        pairCounts[key] = (materia: m, subtema: s, count: 1);
+      } else {
+        pairCounts[key] = (
+          materia: prev.materia,
+          subtema: prev.subtema,
+          count: prev.count + 1,
+        );
+      }
+    }
+
+    await _commitDeletesEmLotes(snap.docs.map((d) => d.reference).toList());
+    await _materiaStats.decrementMateria(materia, by: snap.docs.length);
+    for (final e in pairCounts.values) {
+      await _subtemaCatalog.unregisterCard(
+        e.materia,
+        e.subtema,
+        by: e.count,
+      );
+    }
+    return snap.docs.length;
   }
 
   // ========================================================================
@@ -325,8 +442,9 @@ class FirebaseService {
         'pergunta': data['pergunta'] ?? '',
         'resposta': data['resposta'] ?? '',
         'explicacao': data['explicacao'] ?? '',
-        'imagemPergunta': data['imagemPergunta'] ?? '',
-        'imagemResposta': data['imagemResposta'] ?? '',
+        'imagemPerguntaLocal': data['imagemPerguntaLocal'] ?? '',
+        'imagemRespostaLocal': data['imagemRespostaLocal'] ?? '',
+        'imagemExplicacaoLocal': data['imagemExplicacaoLocal'] ?? '',
         'dificuldade': data['dificuldade'] ?? 'medio',
         'createdAt': data['createdAt'] is Timestamp
             ? (data['createdAt'] as Timestamp).toDate().toIso8601String()
@@ -395,17 +513,31 @@ class FirebaseService {
         if (item is! Map<String, dynamic>) continue;
 
         final materia = (item['materia'] ?? '').toString().trim();
-        final tema = (item['tema'] ?? '').toString().trim();
         final subtema = (item['subtema'] ?? '').toString().trim();
         final pergunta = (item['pergunta'] ?? '').toString().trim();
         final resposta = (item['resposta'] ?? '').toString().trim();
         final explicacao = (item['explicacao'] ?? '').toString().trim();
-        final imagemPergunta = (item['imagemPergunta'] ?? '').toString().trim();
-        final imagemResposta = (item['imagemResposta'] ?? '').toString().trim();
+        var imagemPerguntaLocal = flashcardMigrateImageFieldToStorageRef(
+          (item['imagemPerguntaLocal'] ?? '').toString(),
+        );
+        var imagemRespostaLocal = flashcardMigrateImageFieldToStorageRef(
+          (item['imagemRespostaLocal'] ?? '').toString(),
+        );
+        var imagemExplicacaoLocal = flashcardMigrateImageFieldToStorageRef(
+          (item['imagemExplicacaoLocal'] ?? '').toString(),
+        );
+        if (imagemPerguntaLocal.isEmpty) {
+          final legado = (item['imagemLocal'] ?? '').toString().trim();
+          if (legado.isNotEmpty &&
+              !legado.contains('..') &&
+              !legado.toLowerCase().startsWith('http')) {
+            imagemPerguntaLocal =
+                flashcardMigrateImageFieldToStorageRef(legado);
+          }
+        }
         final dificuldade = (item['dificuldade'] ?? 'medio').toString().trim();
 
         if (materia.isEmpty ||
-            tema.isEmpty ||
             subtema.isEmpty ||
             pergunta.isEmpty ||
             resposta.isEmpty) {
@@ -416,24 +548,28 @@ class FirebaseService {
 
         final searchTerms = _gerarSearchTerms([
           materia,
-          tema,
           subtema,
           pergunta,
           resposta,
           explicacao,
         ]);
 
+        final ordemEstudo =
+            await _proximaOrdemEstudoParaSubtema(materia, subtema);
+
         await docRef.set({
           'id': docRef.id,
           'materia': materia,
-          'tema': tema,
+          'tema': '',
           'subtema': subtema,
           'pergunta': pergunta,
           'resposta': resposta,
           'explicacao': explicacao,
-          'imagemPergunta': imagemPergunta,
-          'imagemResposta': imagemResposta,
+          'imagemPerguntaLocal': imagemPerguntaLocal,
+          'imagemRespostaLocal': imagemRespostaLocal,
+          'imagemExplicacaoLocal': imagemExplicacaoLocal,
           'dificuldade': dificuldade.isEmpty ? 'medio' : dificuldade,
+          'ordemEstudo': ordemEstudo,
           'searchTerms': searchTerms.toList(),
           'createdAt': Timestamp.now(),
           'updatedAt': Timestamp.now(),
@@ -442,112 +578,14 @@ class FirebaseService {
         importados++;
       }
 
+      if (importados > 0) {
+        await _materiaStats.rebuildFromFlashcards();
+        await _subtemaCatalog.rebuildFromFlashcards();
+      }
+
       return importados;
     } catch (e) {
       rethrow;
-    }
-  }
-
-  // ========================================================================
-  // Imagem / Firebase Storage
-  // ========================================================================
-
-  /// Envia uma imagem (como Uint8List) para o Firebase Storage e retorna a URL de download.
-  Future<String?> uploadImagem(
-    Uint8List imagemBytes,
-    String nomeArquivo,
-    {String? contentType}
-  ) async {
-    try {
-      // #region agent log
-      await _debugLog(
-        hypothesisId: 'H1',
-        location: 'firebase_service.dart:394',
-        message: 'uploadImagem:start',
-        data: {
-          'nomeArquivo': nomeArquivo,
-          'bytesLength': imagemBytes.length,
-          'contentType': contentType,
-        },
-      );
-      // #endregion
-      final ref = FirebaseStorage.instance
-          .ref()
-          .child('flashcards')
-          .child(nomeArquivo);
-
-      final metadata = SettableMetadata(
-        contentType: contentType,
-        cacheControl: 'public, max-age=3600',
-      );
-
-      final uploadTask = ref.putData(imagemBytes, metadata);
-      TaskSnapshot task;
-      try {
-        task = await uploadTask.whenComplete(() {}).timeout(
-          const Duration(seconds: 35),
-          onTimeout: () async {
-            try {
-              await uploadTask.cancel();
-            } catch (_) {}
-            throw FirebaseException(
-              plugin: 'firebase_storage',
-              code: 'timeout',
-              message:
-                  'Timeout ao enviar imagem. Verifique sua conexão e as regras do Firebase Storage.',
-            );
-          },
-        );
-      } on FirebaseException {
-        rethrow;
-      }
-
-      if (task.state != TaskState.success) {
-        throw FirebaseException(
-          plugin: 'firebase_storage',
-          code: 'upload-failed',
-          message: 'Falha ao enviar imagem (state=${task.state}).',
-        );
-      }
-      // IMPORTANT: use o ref do snapshot do upload (evita object-not-found em alguns devices).
-      final url = await task.ref.getDownloadURL();
-      // #region agent log
-      await _debugLog(
-        hypothesisId: 'H1',
-        location: 'firebase_service.dart:400',
-        message: 'uploadImagem:success',
-        data: {'nomeArquivo': nomeArquivo, 'hasUrl': url.isNotEmpty},
-      );
-      // #endregion
-      return url;
-    } on FirebaseException catch (e) {
-      // #region agent log
-      await _debugLog(
-        hypothesisId: 'H1',
-        location: 'firebase_service.dart:402',
-        message: 'uploadImagem:error',
-        data: {'nomeArquivo': nomeArquivo, 'error': e.toString(), 'code': e.code},
-      );
-      // #endregion
-      rethrow;
-    } catch (e) {
-      await _debugLog(
-        hypothesisId: 'H1',
-        location: 'firebase_service.dart:402',
-        message: 'uploadImagem:error',
-        data: {'nomeArquivo': nomeArquivo, 'error': e.toString()},
-      );
-      rethrow;
-    }
-  }
-
-  /// Deleta um arquivo no Firebase Storage a partir de sua URL.
-  Future<void> _excluirArquivoStoragePorUrl(String url) async {
-    try {
-      final ref = FirebaseStorage.instance.refFromURL(url);
-      await ref.delete();
-    } catch (e) {
-      // Ignorar erros ao excluir arquivo do storage, pois pode não existir
     }
   }
 }

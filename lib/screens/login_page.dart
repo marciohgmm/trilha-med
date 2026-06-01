@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import 'package:flutter_application_1/services/auth/credenciais_salvas_service.dart';
+import 'package:flutter_application_1/services/auth/user_profile_service.dart';
+import 'package:flutter_application_1/services/analytics/app_analytics_service.dart';
+import 'package:flutter_application_1/services/auth/auth_rate_limit_service.dart';
 import 'package:flutter_application_1/services/biometria/biometria_service.dart';
 import 'main_navigation_page.dart';
 import 'register_screen.dart';
@@ -50,8 +53,8 @@ class _LoginPageState extends State<LoginPage> {
 
     setState(() {
       _salvarSenhaHabilitado = salvarSenha;
-      _temCredenciaisSalvas =
-          (creds.email?.isNotEmpty ?? false) && (creds.senha?.isNotEmpty ?? false);
+      _temCredenciaisSalvas = (creds.email?.isNotEmpty ?? false) &&
+          (creds.senha?.isNotEmpty ?? false);
       usuarioJaLogado = currentUser != null;
       if (salvarSenha && (creds.email?.isNotEmpty ?? false)) {
         emailController.text = creds.email!;
@@ -72,24 +75,20 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _loginComBiometria() async {
-    final autenticado = await _biometriaService.autenticarComBiometria();
-    if (!mounted) return;
+    setState(() => carregandoLogin = true);
 
-    if (autenticado) {
-      final currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser != null) {
-        await currentUser.reload();
-        final user = FirebaseAuth.instance.currentUser;
-        if (!mounted) return;
-        if (user != null) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => MainNavigationPage(userId: user.uid),
-            ),
-          );
-          return;
-        }
+    try {
+      final autenticado = await _biometriaService.autenticarComBiometria();
+      if (!mounted) return;
+
+      if (!autenticado) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Autenticação biométrica cancelada ou falhou.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
       }
 
       if (_salvarSenhaHabilitado) {
@@ -102,25 +101,37 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
 
+      var user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await user.reload();
+        user = FirebaseAuth.instance.currentUser;
+        if (user != null && user.emailVerified) {
+          await UserProfileService().ensureUserDocument(user: user);
+          if (!mounted) return;
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => MainNavigationPage(userId: user!.uid),
+            ),
+          );
+          return;
+        }
+      }
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            "Biometria ok, mas não há sessão/credenciais salvas para entrar.",
+            'Ative "Salvar senha", faça login uma vez com email e senha, '
+            'depois use a biometria.',
           ),
           backgroundColor: Colors.orange,
+          duration: Duration(seconds: 5),
         ),
       );
-      return;
+    } finally {
+      if (mounted) setState(() => carregandoLogin = false);
     }
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Autenticação biométrica falhou. Tente novamente."),
-        backgroundColor: Colors.red,
-      ),
-    );
   }
 
   Future<void> _loginComCredenciais({
@@ -167,6 +178,10 @@ class _LoginPageState extends State<LoginPage> {
         );
         return;
       }
+
+      await UserProfileService().ensureUserDocument(user: user);
+
+      await AppAnalyticsService.instance.logLogin(userId: user.uid);
 
       if (_salvarSenhaHabilitado) {
         await _credenciaisService.salvarCredenciais(email: email, senha: senha);
@@ -257,6 +272,7 @@ class _LoginPageState extends State<LoginPage> {
     FocusScope.of(context).unfocus();
 
     try {
+      await AuthRateLimitService().assertPasswordResetAllowed(email);
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
 
       if (!mounted) return;
@@ -482,7 +498,8 @@ class _LoginPageState extends State<LoginPage> {
                             const SizedBox(height: 10),
                             SwitchListTile.adaptive(
                               contentPadding: EdgeInsets.zero,
-                              title: const Text("Salvar senha neste dispositivo"),
+                              title:
+                                  const Text("Salvar senha neste dispositivo"),
                               value: _salvarSenhaHabilitado,
                               onChanged: (v) async {
                                 setState(() {
@@ -529,16 +546,19 @@ class _LoginPageState extends State<LoginPage> {
                                       ),
                               ),
                             ),
-                            if ((_dispositivoSuportaBiometria &&
+                            if (_dispositivoSuportaBiometria &&
                                 !kIsWeb &&
-                                (usuarioJaLogado || _temCredenciaisSalvas)))
+                                (usuarioJaLogado ||
+                                    _temCredenciaisSalvas ||
+                                    _salvarSenhaHabilitado))
                               Column(
                                 children: [
                                   const SizedBox(height: 12),
                                   SizedBox(
                                     width: double.infinity,
                                     child: ElevatedButton.icon(
-                                      onPressed: _loginComBiometria,
+                                      onPressed:
+                                          carregandoLogin ? null : _loginComBiometria,
                                       icon: const Icon(Icons.fingerprint),
                                       label: const Text(
                                         "Entrar com biometria",

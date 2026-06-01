@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/criar_flashcard_page.dart';
+import 'package:flutter_application_1/screens/reordenar_flashcards_page.dart';
 import 'package:flutter_application_1/services/firebase_service.dart';
 
 class GerenciarFlashcardsPage extends StatefulWidget {
@@ -33,18 +34,21 @@ class _GerenciarFlashcardsPageState extends State<GerenciarFlashcardsPage> {
               : null;
 
       if (ops is List) {
-        return ops.map((item) {
-          if (item is Map<String, dynamic>) {
-            final insert = item['insert'];
-            if (insert is String) {
-              return insert;
-            }
-            if (insert is Map<String, dynamic> && insert['image'] != null) {
-              return '[Imagem]';
-            }
-          }
-          return item.toString();
-        }).join().trim();
+        return ops
+            .map((item) {
+              if (item is Map<String, dynamic>) {
+                final insert = item['insert'];
+                if (insert is String) {
+                  return insert;
+                }
+                if (insert is Map<String, dynamic> && insert['image'] != null) {
+                  return '[Imagem]';
+                }
+              }
+              return item.toString();
+            })
+            .join()
+            .trim();
       }
     } catch (_) {
       // não é Delta JSON, cai para texto simples
@@ -169,7 +173,6 @@ class _GerenciarFlashcardsPageState extends State<GerenciarFlashcardsPage> {
     required Map<String, dynamic> data,
   }) {
     final materia = (data['materia'] ?? '').toString();
-    final tema = (data['tema'] ?? '').toString();
     final subtema = (data['subtema'] ?? '').toString();
     final pergunta = _normalizarConteudoRichText(data['pergunta']);
     final resposta = _normalizarConteudoRichText(data['resposta']);
@@ -183,9 +186,7 @@ class _GerenciarFlashcardsPageState extends State<GerenciarFlashcardsPage> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
-          color: estaSelecionado
-              ? const Color(0xFF1E3A8A)
-              : Colors.transparent,
+          color: estaSelecionado ? const Color(0xFF1E3A8A) : Colors.transparent,
           width: 1.4,
         ),
       ),
@@ -254,11 +255,6 @@ class _GerenciarFlashcardsPageState extends State<GerenciarFlashcardsPage> {
               ),
               const SizedBox(height: 10),
               Text(
-                'Tema: ${tema.isEmpty ? "-" : tema}',
-                style: const TextStyle(fontSize: 14),
-              ),
-              const SizedBox(height: 4),
-              Text(
                 'Subtema: ${subtema.isEmpty ? "-" : subtema}',
                 style: const TextStyle(fontSize: 14),
               ),
@@ -316,6 +312,19 @@ class _GerenciarFlashcardsPageState extends State<GerenciarFlashcardsPage> {
               )
             : null,
         actions: [
+          if (!modoSelecao)
+            IconButton(
+              tooltip: 'Ordem de estudo (arrastar)',
+              onPressed: () {
+                Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ReordenarFlashcardsPage(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.swap_vert),
+            ),
           if (modoSelecao)
             IconButton(
               onPressed: excluindoLote ? null : _confirmarExclusaoEmLote,

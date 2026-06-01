@@ -31,8 +31,12 @@ class _EditarQuestoesPageState extends State<EditarQuestoesPage> {
           title: const Text('Excluir questão'),
           content: const Text('Deseja realmente excluir esta questão?'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-            ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Excluir')),
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Excluir')),
           ],
         );
       },
@@ -52,7 +56,8 @@ class _EditarQuestoesPageState extends State<EditarQuestoesPage> {
     });
 
     if (!success) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao excluir questão.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erro ao excluir questão.')));
     }
   }
 
@@ -84,7 +89,8 @@ class _EditarQuestoesPageState extends State<EditarQuestoesPage> {
               decoration: InputDecoration(
                 hintText: 'Buscar por matéria, tema ou subtema',
                 prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
                 fillColor: Colors.white,
               ),
@@ -103,12 +109,12 @@ class _EditarQuestoesPageState extends State<EditarQuestoesPage> {
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  final questoes = snapshot.data!
-                      .where((questao) {
-                        final search = '${questao.materia} ${questao.tema} ${questao.subtema} ${questao.enunciado}'.toLowerCase();
-                        return search.contains(_searchQuery);
-                      })
-                      .toList();
+                  final questoes = snapshot.data!.where((questao) {
+                    final search =
+                        '${questao.materia} ${questao.tema} ${questao.subtema} ${questao.enunciado}'
+                            .toLowerCase();
+                    return search.contains(_searchQuery);
+                  }).toList();
 
                   if (questoes.isEmpty) {
                     return const Center(
@@ -122,20 +128,27 @@ class _EditarQuestoesPageState extends State<EditarQuestoesPage> {
                       final questao = questoes[index];
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
                         child: ListTile(
-                          title: Text(questao.enunciado, maxLines: 2, overflow: TextOverflow.ellipsis),
-                          subtitle: Text('${questao.materia} • ${questao.tema} • ${questao.subtema}'),
+                          title: Text(questao.enunciado,
+                              maxLines: 2, overflow: TextOverflow.ellipsis),
+                          subtitle: Text(
+                              '${questao.materia} • ${questao.tema} • ${questao.subtema}'),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                icon: const Icon(Icons.edit, color: Color(0xFF1E3A8A)),
+                                icon: const Icon(Icons.edit,
+                                    color: Color(0xFF1E3A8A)),
                                 onPressed: () => _openEditor(questao),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete, color: Colors.red),
-                                onPressed: _loadingDelete ? null : () => _deleteQuestao(questao.id),
+                                icon:
+                                    const Icon(Icons.delete, color: Colors.red),
+                                onPressed: _loadingDelete
+                                    ? null
+                                    : () => _deleteQuestao(questao.id),
                               ),
                             ],
                           ),

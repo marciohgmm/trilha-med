@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/services/firebase_service.dart';
 import 'criar_flashcard_page.dart';
-import 'admin_temas_page.dart';
+import 'admin_subtemas_page.dart';
+import 'package:flutter_application_1/utils/content_hierarchy_utils.dart';
 
 class AdminMateriasPage extends StatefulWidget {
   const AdminMateriasPage({super.key});
@@ -11,6 +13,7 @@ class AdminMateriasPage extends StatefulWidget {
 }
 
 class _AdminMateriasPageState extends State<AdminMateriasPage> {
+  final FirebaseService _firebaseService = FirebaseService();
   Map<String, int> _agruparMaterias(List<QueryDocumentSnapshot> docs) {
     final Map<String, int> mapa = {};
 
@@ -121,24 +124,19 @@ class _AdminMateriasPageState extends State<AdminMateriasPage> {
     if (confirmar != true) return;
 
     try {
-      final query = await FirebaseFirestore.instance
-          .collection('flashcards')
-          .where('materia', isEqualTo: materia)
-          .get();
-
-      final batch = FirebaseFirestore.instance.batch();
-
-      for (final doc in query.docs) {
-        batch.delete(doc.reference);
-      }
-
-      await batch.commit();
+      final n = await _firebaseService.excluirFlashcardsPorFiltro(
+        materia: materia,
+      );
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Matéria "$materia" excluída com sucesso'),
+          content: Text(
+            n == 0
+                ? 'Nenhum flashcard encontrado para essa matéria.'
+                : 'Matéria "$materia" excluída ($n flashcard(s)).',
+          ),
         ),
       );
     } catch (e) {
@@ -153,11 +151,11 @@ class _AdminMateriasPageState extends State<AdminMateriasPage> {
     }
   }
 
-  void _abrirTemas(String materia) {
+  void _abrirSubtemas(String materia) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => AdminTemasPage(materia: materia),
+        builder: (_) => AdminSubtemasPage(materia: materia),
       ),
     );
   }
@@ -172,9 +170,7 @@ class _AdminMateriasPageState extends State<AdminMateriasPage> {
         foregroundColor: Colors.white,
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('flashcards')
-            .snapshots(),
+        stream: FirebaseFirestore.instance.collection('flashcards').snapshots(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
@@ -182,7 +178,8 @@ class _AdminMateriasPageState extends State<AdminMateriasPage> {
 
           final docs = snapshot.data!.docs;
           final materiasMap = _agruparMaterias(docs);
-          final materias = materiasMap.keys.toList()..sort();
+          final materias =
+              ContentHierarchyUtils.sortAlphabetically(materiasMap.keys);
 
           if (materias.isEmpty) {
             return const Center(
@@ -245,7 +242,7 @@ class _AdminMateriasPageState extends State<AdminMateriasPage> {
                       ),
                     ],
                   ),
-                  onTap: () => _abrirTemas(materia),
+                  onTap: () => _abrirSubtemas(materia),
                 ),
               );
             },

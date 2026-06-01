@@ -1,19 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_application_1/models/questao_model.dart';
+import 'package:flutter_application_1/services/flashcard_create_session_defaults.dart';
+import 'package:flutter_application_1/services/flashcard_materia_stats_service.dart';
+import 'package:flutter_application_1/services/flashcard_subtema_catalog_service.dart';
 import 'package:flutter_application_1/services/questao_service.dart';
+import 'package:flutter_application_1/utils/content_hierarchy_utils.dart';
+import 'package:flutter_application_1/widgets/subtema_search_field.dart';
 
 class CriarQuestaoPage extends StatefulWidget {
   final QuestaoModel? questao;
   final String? initialMateria;
-  final String? initialTema;
   final String? initialSubtema;
 
   const CriarQuestaoPage({
     super.key,
     this.questao,
     this.initialMateria,
-    this.initialTema,
     this.initialSubtema,
   });
 
@@ -28,12 +30,10 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
 
   final _enunciadoController = TextEditingController();
 
-  // Matéria/Tema/Subtema reaproveitados dos flashcards (com opção de criar novo)
+  // Matéria/Subtema reaproveitados dos flashcards (com opção de criar novo)
   List<String> _materias = [];
-  List<String> _temas = [];
   List<String> _subtemas = [];
   String? _materiaSelecionada;
-  String? _temaSelecionado;
   String? _subtemaSelecionado;
   bool _carregandoOpcoes = true;
 
@@ -42,20 +42,46 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
   bool _ativo = true;
   bool _salvando = false;
 
-  // Alternativas A-D por padrão
-  final Map<String, TextEditingController> _altControllers = {
-    'A': TextEditingController(),
-    'B': TextEditingController(),
-    'C': TextEditingController(),
-    'D': TextEditingController(),
-  };
+  // Alternativas A-D por padrão (com opção de adicionar E)
+  final List<String> _altOrdem = ['A', 'B', 'C', 'D'];
+  final Map<String, TextEditingController> _altControllers = {};
+  final Map<String, TextEditingController> _justControllers = {};
 
-  final Map<String, TextEditingController> _justControllers = {
-    'A': TextEditingController(),
-    'B': TextEditingController(),
-    'C': TextEditingController(),
-    'D': TextEditingController(),
-  };
+  static const List<String> _idsPermitidos = ['A', 'B', 'C', 'D', 'E'];
+
+  void _ensureControllers(String id) {
+    _altControllers.putIfAbsent(id, () => TextEditingController());
+    _justControllers.putIfAbsent(id, () => TextEditingController());
+  }
+
+  bool get _podeAdicionarAlternativa =>
+      _altOrdem.length < _idsPermitidos.length;
+
+  void _adicionarAlternativa() {
+    if (!_podeAdicionarAlternativa) return;
+    final proximoId = _idsPermitidos[_altOrdem.length];
+    setState(() {
+      _altOrdem.add(proximoId);
+      _ensureControllers(proximoId);
+    });
+  }
+
+  String _normalizarJustificativa(String raw) {
+    var t = raw.trimLeft();
+    if (t.isEmpty) return '';
+    // Remove prefixos como "A)", "A.", "A -", "A:" etc.
+    t = t.replaceFirst(
+      RegExp(r'^[A-Ea-e]\s*[\)\.\:\-]\s*'),
+      '',
+    );
+    // Remove prefixos como "Alternativa A:" (qualquer letra A-E).
+    t = t.replaceFirst(
+      RegExp(r'^(Alternativa|Op[cç][aã]o)\s+[A-Ea-e]\s*[\)\.\:\-]?\s*',
+          caseSensitive: false),
+      '',
+    );
+    return t.trimLeft();
+  }
 
   bool get _modoEdicao => widget.questao != null;
 
@@ -63,42 +89,48 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
   void initState() {
     super.initState();
 
+    // inicializa controllers padrão
+    for (final id in _altOrdem) {
+      _ensureControllers(id);
+    }
+
     _carregarMateriasDosFlashcards();
 
     final q = widget.questao;
     if (q != null) {
       _materiaSelecionada = q.materia.trim().isEmpty ? null : q.materia;
-      _temaSelecionado = q.tema.trim().isEmpty ? null : q.tema;
       _subtemaSelecionado = q.subtema.trim().isEmpty ? null : q.subtema;
       _enunciadoController.text = q.enunciado;
       _ativo = q.ativo;
 
       for (final alt in q.alternativas) {
-        final c = _altControllers[alt.id];
-        if (c != null) c.text = alt.texto;
+        final id = alt.id.trim();
+        if (id.isEmpty) continue;
+        if (!_altOrdem.contains(id) && _idsPermitidos.contains(id)) {
+          _altOrdem.add(id);
+        }
+        _ensureControllers(id);
+        _altControllers[id]!.text = alt.texto;
       }
       for (final entry in q.justificativasPorAlternativa.entries) {
-        final c = _justControllers[entry.key];
-        if (c != null) c.text = entry.value;
+        final id = entry.key.trim();
+        if (id.isEmpty) continue;
+        if (!_altOrdem.contains(id) && _idsPermitidos.contains(id)) {
+          _altOrdem.add(id);
+        }
+        _ensureControllers(id);
+        _justControllers[id]!.text = entry.value;
       }
-    } else {
-      // Criando dentro do fluxo admin (matéria/tema/subtema já escolhidos)
-      _materiaSelecionada = widget.initialMateria;
-      _temaSelecionado = widget.initialTema;
-      _subtemaSelecionado = widget.initialSubtema;
     }
+    // Matéria/subtema ao criar: preenchidos após carregar opções
+    // ([_aplicarDefaultsDaSessao] ou fallback de [initialMateria]/[initialSubtema]).
   }
 
   Future<void> _carregarMateriasDosFlashcards() async {
     try {
-      final snapshot =
-          await FirebaseFirestore.instance.collection('flashcards').get();
-      final set = <String>{};
-      for (final doc in snapshot.docs) {
-        final materia = (doc.data()['materia'] ?? '').toString().trim();
-        if (materia.isNotEmpty) set.add(materia);
-      }
-      final lista = set.toList()..sort();
+      final stats =
+          await FlashcardMateriaStatsService.instance.fetchMateriaStats();
+      final lista = stats.map((s) => s.name).toList()..sort();
 
       if (!mounted) return;
       setState(() {
@@ -106,14 +138,10 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
         _carregandoOpcoes = false;
       });
 
-      // Em modo edição, tenta carregar temas/subtemas correspondentes.
       if (_materiaSelecionada != null && _materiaSelecionada!.isNotEmpty) {
-        await _carregarTemasDaMateria(_materiaSelecionada!);
-      }
-      if (_materiaSelecionada != null &&
-          _temaSelecionado != null &&
-          _temaSelecionado!.isNotEmpty) {
-        await _carregarSubtemas(_materiaSelecionada!, _temaSelecionado!);
+        await _carregarSubtemasDaMateria(_materiaSelecionada!);
+      } else if (!_modoEdicao) {
+        await _aplicarDefaultsDaSessao();
       }
     } catch (_) {
       if (!mounted) return;
@@ -123,38 +151,48 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
     }
   }
 
-  Future<void> _carregarTemasDaMateria(String materia) async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('flashcards')
-        .where('materia', isEqualTo: materia)
-        .get();
-
-    final set = <String>{};
-    for (final doc in snapshot.docs) {
-      final tema = (doc.data()['tema'] ?? '').toString().trim();
-      if (tema.isNotEmpty) set.add(tema);
+  /// Reaplica matéria/subtema da sessão (mesmo padrão de criar flashcard).
+  Future<void> _aplicarDefaultsDaSessao() async {
+    if (FlashcardCreateSessionDefaults.hasPair) {
+      final m = FlashcardCreateSessionDefaults.ultimaMateriaSelecionada!.trim();
+      final s = FlashcardCreateSessionDefaults.ultimoSubtemaSelecionado!.trim();
+      if (m.isNotEmpty && s.isNotEmpty && _materias.contains(m)) {
+        setState(() {
+          _materiaSelecionada = m;
+          _subtemaSelecionado = null;
+          _subtemas = [];
+        });
+        await _carregarSubtemasDaMateria(m);
+        if (!mounted) return;
+        setState(() {
+          _subtemaSelecionado = s;
+        });
+        return;
+      }
     }
-    final lista = set.toList()..sort();
-    if (!mounted) return;
+
+    final m = widget.initialMateria?.trim() ?? '';
+    final s = widget.initialSubtema?.trim() ?? '';
+    if (m.isEmpty) return;
+    if (!_materias.contains(m)) return;
+
     setState(() {
-      _temas = lista;
+      _materiaSelecionada = m;
+      _subtemaSelecionado = s.isEmpty ? null : s;
       _subtemas = [];
+    });
+    await _carregarSubtemasDaMateria(m);
+    if (!mounted || s.isEmpty) return;
+    setState(() {
+      _subtemaSelecionado = s;
     });
   }
 
-  Future<void> _carregarSubtemas(String materia, String tema) async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('flashcards')
-        .where('materia', isEqualTo: materia)
-        .where('tema', isEqualTo: tema)
-        .get();
-
-    final set = <String>{};
-    for (final doc in snapshot.docs) {
-      final subtema = (doc.data()['subtema'] ?? '').toString().trim();
-      if (subtema.isNotEmpty) set.add(subtema);
-    }
-    final lista = set.toList()..sort();
+  Future<void> _carregarSubtemasDaMateria(String materia) async {
+    final lista =
+        await FlashcardSubtemaCatalogService.instance.fetchSubtemasByMateria(
+      materia,
+    );
     if (!mounted) return;
     setState(() {
       _subtemas = lista;
@@ -211,14 +249,13 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
     try {
       final agora = DateTime.now();
       final materia = (_materiaSelecionada ?? '').trim();
-      final tema = (_temaSelecionado ?? '').trim();
       final subtema = (_subtemaSelecionado ?? '').trim();
 
-      if (materia.isEmpty || tema.isEmpty || subtema.isEmpty) {
-        throw Exception('Selecione matéria, tema e subtema.');
+      if (materia.isEmpty || subtema.isEmpty) {
+        throw Exception('Selecione matéria e subtema.');
       }
 
-      final temaSlug = QuestaoModel.slugify(tema);
+      final temaSlug = QuestaoModel.slugify(subtema);
 
       final alternativas = _altControllers.entries
           .map(
@@ -236,7 +273,7 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
 
       final justificativas = <String, String>{};
       for (final entry in _justControllers.entries) {
-        final v = entry.value.text.trim();
+        final v = _normalizarJustificativa(entry.value.text);
         if (v.isNotEmpty) {
           justificativas[entry.key] = v;
         }
@@ -248,7 +285,7 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
         temaSlug: temaSlug,
         materiaId: widget.questao?.materiaId ?? '',
         materia: materia,
-        tema: tema,
+        tema: '',
         subtema: subtema,
         flashcardId: null,
         enunciado: _enunciadoController.text.trim(),
@@ -271,6 +308,8 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
 
       if (!mounted) return;
       if (!ok) throw Exception('Falha ao salvar no Firestore.');
+
+      FlashcardCreateSessionDefaults.setFromForm(materia, subtema);
 
       Navigator.pop(context, true);
     } catch (e) {
@@ -326,6 +365,26 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
         title: Text(title),
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
+        actions: [
+          if (!_modoEdicao)
+            IconButton(
+              tooltip: 'Limpar assunto padrão da sessão',
+              icon: const Icon(Icons.restart_alt_rounded),
+              onPressed: () {
+                FlashcardCreateSessionDefaults.clear();
+                setState(() {
+                  _materiaSelecionada = null;
+                  _subtemaSelecionado = null;
+                  _subtemas = [];
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Seleção padrão da sessão limpa.'),
+                  ),
+                );
+              },
+            ),
+        ],
       ),
       body: SafeArea(
         child: Form(
@@ -340,6 +399,9 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
                 )
               else ...[
                 DropdownButtonFormField<String>(
+                  key: ValueKey<String>(
+                    'q_dd_materia_${_materias.length}_${_materiaSelecionada ?? ''}',
+                  ),
                   initialValue: _materias.contains(_materiaSelecionada)
                       ? _materiaSelecionada
                       : null,
@@ -369,117 +431,54 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
                           _materias.sort();
                         }
                         _materiaSelecionada = novo;
-                        _temaSelecionado = null;
                         _subtemaSelecionado = null;
-                        _temas = [];
                         _subtemas = [];
                       });
-                      await _carregarTemasDaMateria(novo);
+                      await _carregarSubtemasDaMateria(novo);
                       return;
                     }
 
                     setState(() {
                       _materiaSelecionada = value;
-                      _temaSelecionado = null;
-                      _subtemaSelecionado = null;
-                      _temas = [];
-                      _subtemas = [];
-                    });
-                    if (value != null && value.isNotEmpty) {
-                      await _carregarTemasDaMateria(value);
-                    }
-                  },
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _temas.contains(_temaSelecionado)
-                      ? _temaSelecionado
-                      : null,
-                  decoration: _dec('Tema'),
-                  items: [
-                    ..._temas.map(
-                      (t) => DropdownMenuItem(value: t, child: Text(t)),
-                    ),
-                    const DropdownMenuItem(
-                      value: '__novo_tema__',
-                      child: Text('➕ Novo Tema'),
-                    ),
-                  ],
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Selecione o tema'
-                      : null,
-                  onChanged: (value) async {
-                    final materia = _materiaSelecionada;
-                    if (materia == null || materia.isEmpty) return;
-
-                    if (value == '__novo_tema__') {
-                      final novo = await _mostrarDialogNovoValor(
-                        titulo: 'Novo Tema',
-                        hint: 'Digite o nome do tema',
-                      );
-                      if (novo == null || novo.isEmpty || !mounted) return;
-                      setState(() {
-                        if (!_temas.contains(novo)) {
-                          _temas.add(novo);
-                          _temas.sort();
-                        }
-                        _temaSelecionado = novo;
-                        _subtemaSelecionado = null;
-                        _subtemas = [];
-                      });
-                      await _carregarSubtemas(materia, novo);
-                      return;
-                    }
-
-                    setState(() {
-                      _temaSelecionado = value;
                       _subtemaSelecionado = null;
                       _subtemas = [];
                     });
                     if (value != null && value.isNotEmpty) {
-                      await _carregarSubtemas(materia, value);
+                      await _carregarSubtemasDaMateria(value);
                     }
                   },
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _subtemas.contains(_subtemaSelecionado)
-                      ? _subtemaSelecionado
-                      : null,
-                  decoration: _dec('Subtema'),
-                  items: [
-                    ..._subtemas.map(
-                      (s) => DropdownMenuItem(value: s, child: Text(s)),
+                if (_materiaSelecionada != null &&
+                    _materiaSelecionada!.isNotEmpty)
+                  SubtemaSearchField(
+                    key: ValueKey(
+                      'q_sub_${_materiaSelecionada}_${_subtemas.length}_${_subtemaSelecionado ?? ''}',
                     ),
-                    const DropdownMenuItem(
-                      value: '__novo_subtema__',
-                      child: Text('➕ Novo Subtema'),
-                    ),
-                  ],
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Selecione o subtema'
-                      : null,
-                  onChanged: (value) async {
-                    if (value == '__novo_subtema__') {
+                    subtemas: _subtemas,
+                    selectedSubtema: _subtemaSelecionado,
+                    onCreateNew: () async {
                       final novo = await _mostrarDialogNovoValor(
                         titulo: 'Novo Subtema',
                         hint: 'Digite o nome do subtema',
                       );
                       if (novo == null || novo.isEmpty || !mounted) return;
                       setState(() {
-                        if (!_subtemas.contains(novo)) {
-                          _subtemas.add(novo);
-                          _subtemas.sort();
-                        }
+                        _subtemas = ContentHierarchyUtils.sortAlphabetically({
+                          ..._subtemas,
+                          novo,
+                        });
                         _subtemaSelecionado = novo;
                       });
-                      return;
-                    }
-                    setState(() {
-                      _subtemaSelecionado = value;
-                    });
-                  },
-                ),
+                    },
+                    onSelected: (value) {
+                      setState(() {
+                        _subtemaSelecionado = value?.trim().isEmpty == true
+                            ? null
+                            : value?.trim();
+                      });
+                    },
+                  ),
               ],
               const SizedBox(height: 12),
               TextFormField(
@@ -499,21 +498,38 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
                 ),
               ),
               const SizedBox(height: 10),
-              ..._altControllers.entries.map((e) {
-                final isCorreta = e.key == 'A';
+              ..._altOrdem.map((id) {
+                final controller = _altControllers[id]!;
+                final isCorreta = id == 'A';
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: TextFormField(
-                    controller: e.value,
+                    controller: controller,
                     decoration: isCorreta
-                        ? _decVerde('Alternativa ${e.key} (correta)')
-                        : _dec('Alternativa ${e.key}'),
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'Informe o texto da alternativa ${e.key}'
-                        : null,
+                        ? _decVerde('Alternativa $id (correta)')
+                        : _dec('Alternativa $id'),
+                    validator: (v) {
+                      // Mantemos A-D obrigatórias; E é opcional.
+                      final obrigatoria = id != 'E';
+                      if (!obrigatoria) return null;
+                      return (v == null || v.trim().isEmpty)
+                          ? 'Informe o texto da alternativa $id'
+                          : null;
+                    },
                   ),
                 );
               }),
+              if (_podeAdicionarAlternativa) ...[
+                const SizedBox(height: 2),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: _adicionarAlternativa,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Adicionar alternativa'),
+                  ),
+                ),
+              ],
               const SizedBox(height: 6),
               Container(
                 width: double.infinity,
@@ -521,7 +537,8 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
                 decoration: BoxDecoration(
                   color: Colors.green.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.green.withValues(alpha: 0.35)),
+                  border:
+                      Border.all(color: Colors.green.withValues(alpha: 0.35)),
                 ),
                 child: const Text(
                   'Gabarito: alternativa A (padrão). As alternativas serão embaralhadas para o aluno.',
@@ -537,15 +554,16 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
                 ),
               ),
               const SizedBox(height: 10),
-              ..._justControllers.entries.map((e) {
-                final isCorreta = e.key == 'A';
+              ..._altOrdem.map((id) {
+                final controller = _justControllers[id]!;
+                final isCorreta = id == 'A';
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: TextFormField(
-                    controller: e.value,
+                    controller: controller,
                     decoration: isCorreta
-                        ? _decVerde('Justificativa ${e.key} (correta)')
-                        : _dec('Justificativa ${e.key}'),
+                        ? _decVerde('Justificativa $id (correta)')
+                        : _dec('Justificativa $id'),
                     maxLines: 2,
                   ),
                 );
@@ -591,4 +609,3 @@ class _CriarQuestaoPageState extends State<CriarQuestaoPage> {
     );
   }
 }
-
