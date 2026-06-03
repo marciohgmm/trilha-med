@@ -296,12 +296,27 @@ async function upsertPremiumEntitlement(params: {
   const now = admin.firestore.Timestamp.now();
   const expiresTs = admin.firestore.Timestamp.fromDate(params.expiresAt);
 
+  const stableRef = entCol.doc(ENTITLEMENT_KEYS.premium);
+  const payload = {
+    key: ENTITLEMENT_KEYS.premium,
+    grantedAt: now,
+    expiresAt: expiresTs,
+    grantSource: GRANT_SOURCE.mercadoPago,
+    sellerId: params.sellerId ?? null,
+    affiliateId: params.affiliateId ?? null,
+    couponId: params.couponId ?? null,
+    subscriptionId: params.subscriptionId,
+    isActive: true,
+    updatedAt: now,
+  };
+
   if (!bySubscription.empty) {
     await bySubscription.docs[0].ref.update({
       expiresAt: expiresTs,
       isActive: true,
       updatedAt: now,
     });
+    await stableRef.set({ ...payload, createdAt: now }, { merge: true });
     return;
   }
 
@@ -319,22 +334,11 @@ async function upsertPremiumEntitlement(params: {
       grantSource: GRANT_SOURCE.mercadoPago,
       updatedAt: now,
     });
+    await stableRef.set({ ...payload, createdAt: now }, { merge: true });
     return;
   }
 
-  await entCol.add({
-    key: ENTITLEMENT_KEYS.premium,
-    grantedAt: now,
-    expiresAt: expiresTs,
-    grantSource: GRANT_SOURCE.mercadoPago,
-    sellerId: params.sellerId ?? null,
-    affiliateId: params.affiliateId ?? null,
-    couponId: params.couponId ?? null,
-    subscriptionId: params.subscriptionId,
-    isActive: true,
-    createdAt: now,
-    updatedAt: now,
-  });
+  await stableRef.set({ ...payload, createdAt: now }, { merge: true });
 }
 
 /**
@@ -579,6 +583,82 @@ export async function trackAffiliateConversion(affiliateId: string): Promise<voi
 }
 
 /** Pagamentos do usuário elegíveis a reconciliação (pending/processing/succeeded incompleto). */
+function entitlementStillValid(data: admin.firestore.DocumentData): boolean {
+  const exp = data.expiresAt as admin.firestore.Timestamp | undefined | null;
+  if (exp == null) return true;
+  const date = exp.toDate?.();
+  return date == null || date.getTime() > Date.now();
+}
+
+/**
+ * Espelha entitlements ativos (doc ID legado) nos IDs estáveis usados pelas Security Rules.
+ * Idempotente; seguro chamar no reconcile pós-checkout ou para premium legado.
+ */
+export async function syncStablePremiumEntitlementMirrors(
+  userId: string
+): Promise<number> {
+  const entCol = db()
+    .collection(COLLECTIONS.users)
+    .doc(userId)
+    .collection(COLLECTIONS.entitlements);
+
+  const keys = [
+    ENTITLEMENT_KEYS.premium,
+    ENTITLEMENT_KEYS.premiumLifetime,
+    ENTITLEMENT_KEYS.courtesyAccess,
+    ENTITLEMENT_KEYS.betaTester,
+  ] as const;
+
+  let mirrored = 0;
+  for (const key of keys) {
+    const stableRef = entCol.doc(key);
+    const stableSnap = await stableRef.get();
+    if (
+      stableSnap.exists
+      && stableSnap.data()?.isActive === true
+      && stableSnap.data()?.key === key
+      && entitlementStillValid(stableSnap.data()!)
+    ) {
+      continue;
+    }
+
+    const snap = await entCol
+      .where("key", "==", key)
+      .where("isActive", "==", true)
+      .get();
+
+    const candidates = snap.docs.filter((d) => entitlementStillValid(d.data()));
+    if (candidates.length === 0) continue;
+
+    const source = candidates.find((d) => d.id === key) ?? candidates[0];
+    const data = source.data();
+    await stableRef.set(
+      {
+        key,
+        isActive: true,
+        grantedAt: data.grantedAt ?? admin.firestore.FieldValue.serverTimestamp(),
+        expiresAt: data.expiresAt ?? null,
+        grantSource: data.grantSource ?? GRANT_SOURCE.manual,
+        sellerId: data.sellerId ?? null,
+        affiliateId: data.affiliateId ?? null,
+        couponId: data.couponId ?? null,
+        subscriptionId: data.subscriptionId ?? null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: stableSnap.exists
+          ? stableSnap.data()?.createdAt
+          : admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    mirrored++;
+  }
+
+  if (mirrored > 0) {
+    logSubscription("entitlement.stable_mirror_sync", { userId, mirrored });
+  }
+  return mirrored;
+}
+
 export async function listPaymentsToReconcileForUser(
   userId: string,
   limit = 5

@@ -1,4 +1,4 @@
-# Estratégia de Monetização de Conteúdo — Trilha Med / Revalida Cards
+# Estratégia de Monetização de Conteúdo — Trilha Med
 
 **Data:** maio/2026  
 **Modo:** Auditoria e estratégia — **nenhum código alterado**  

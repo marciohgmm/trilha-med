@@ -33,6 +33,7 @@ enum CommercialEntitlementKey {
 enum SubscriptionDisplayStatus {
   free('free', 'Gratuito'),
   active('active', 'Ativo'),
+  pastDue('past_due', 'Pagamento pendente'),
   expired('expired', 'Expirado'),
   lifetime('lifetime', 'Vitalício'),
   courtesy('courtesy', 'Cortesia'),

@@ -71,6 +71,22 @@ test("firestore.rules — P1-6 analytics daily", () => {
   assert.match(rules, /expireAt/);
 });
 
+test("firestore.rules — analytics daily root write só admin", () => {
+  const rules = loadRules();
+  const block = rules.match(
+    /match \/platform_analytics_daily\/\{dayId\}[\s\S]*?match \/active_users/,
+  );
+  assert.ok(block, "bloco platform_analytics_daily ausente");
+  assert.match(block[0], /allow create, update: if isAppAdmin\(\)/);
+});
+
+test("firestore.rules — platform_audit_logs create só admin", () => {
+  const rules = loadRules();
+  const block = rules.match(/match \/platform_audit_logs\/\{logId\}[\s\S]*?match \//);
+  assert.ok(block, "bloco platform_audit_logs ausente");
+  assert.match(block[0], /allow create: if isAppAdmin\(\)/);
+});
+
 test("firestore.rules — platform_rate_limits somente backend", () => {
   const rules = loadRules();
   assert.match(rules, /platform_rate_limits/);
@@ -82,4 +98,19 @@ test("firestore.rules — platform_feature_flags", () => {
   assert.match(rules, /platform_feature_flags/);
   assert.match(rules, /allow read: if isSignedIn\(\)/);
   assert.match(rules, /allow create, update: if isAppAdmin\(\)/);
+});
+
+test("firestore.rules — Fase Prática premium hasPremium", () => {
+  const rules = loadRules();
+  assert.match(rules, /function hasPremium\(\)/);
+  assert.match(rules, /canReadPracticalPhaseStudentContent/);
+  assert.match(rules, /practicalPhaseContentRequiresPremium/);
+});
+
+test("storage.rules — Fase Prática alinhada ao Firestore", () => {
+  const rules = readFileSync(join(root, "storage.rules"), "utf8");
+  assert.match(rules, /match \/practical_phase\/\{modelId\}\/\{allPaths=\*\*\}/);
+  assert.match(rules, /canReadPracticalPhaseStorage/);
+  assert.match(rules, /isPublished/);
+  assert.match(rules, /requiresPremium/);
 });

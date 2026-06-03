@@ -38,6 +38,7 @@ class _AdminPracticalPhaseFormPageState
   String _thumbnailUrl = '';
   bool _isActive = true;
   bool _isPublished = false;
+  bool _requiresPremium = false;
   List<PracticalPhaseAttachment> _attachments = [];
   List<PracticalPhaseSection> _sections = [];
   int _order = 0;
@@ -82,6 +83,7 @@ class _AdminPracticalPhaseFormPageState
     _thumbnailUrl = m.thumbnailUrl;
     _isActive = m.isActive;
     _isPublished = m.isPublished;
+    _requiresPremium = m.requiresPremium;
     _attachments = List.from(m.attachments);
     _sections = List.from(m.sections);
     _order = m.order;
@@ -122,6 +124,7 @@ class _AdminPracticalPhaseFormPageState
       thumbnailUrl: _thumbnailUrl,
       isActive: _isActive,
       isPublished: _isPublished,
+      requiresPremium: _requiresPremium,
       order: _order,
       createdAt: _originalCreatedAt ?? now,
       updatedAt: now,
@@ -377,6 +380,14 @@ class _AdminPracticalPhaseFormPageState
                     title: const Text('Publicado'),
                     value: _isPublished,
                     onChanged: (v) => setState(() => _isPublished = v),
+                  ),
+                  SwitchListTile(
+                    title: const Text('Conteúdo Premium'),
+                    subtitle: const Text(
+                      'Exige entitlement premium nas rules do Firestore',
+                    ),
+                    value: _requiresPremium,
+                    onChanged: (v) => setState(() => _requiresPremium = v),
                   ),
                 ],
               ),

@@ -27,6 +27,8 @@ class CommercialStatusChip extends StatelessWidget {
     switch (status) {
       case SubscriptionDisplayStatus.active:
         return (const Color(0xFF059669), const Color(0xFFD1FAE5));
+      case SubscriptionDisplayStatus.pastDue:
+        return (const Color(0xFFB45309), const Color(0xFFFEF3C7));
       case SubscriptionDisplayStatus.lifetime:
         return (const Color(0xFF7C3AED), const Color(0xFFEDE9FE));
       case SubscriptionDisplayStatus.courtesy:

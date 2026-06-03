@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import '../../application/platform/platform_registry.dart';
 import '../../core/commercial/commercial_entitlement.dart';
 import '../../data/commercial_plan_catalog.dart';
+import '../../domain/platform/enums/platform_enums.dart';
 import '../../domain/platform/models/commercial_access_snapshot.dart';
+import '../../domain/platform/models/subscription.dart';
 import '../../widgets/commercial/commercial_status_chip.dart';
 import 'plans_page.dart';
 
@@ -27,41 +29,71 @@ class MySubscriptionPage extends StatelessWidget {
     }
 
     final service = PlatformRegistry.instance.commercialAccess;
+    final subscriptions =
+        PlatformRegistry.instance.repositories.subscriptions;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Minha Assinatura'),
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
       ),
-      body: StreamBuilder<CommercialAccessSnapshot>(
-        stream: service.watchAccess(user.uid),
-        builder: (context, snap) {
-          if (snap.hasError) {
-            return Center(child: Text('Erro: ${snap.error}'));
+      body: StreamBuilder<List<Subscription>>(
+        stream: subscriptions.watchForUser(user.uid, limit: 15),
+        builder: (context, subsSnap) {
+          if (subsSnap.hasError) {
+            return Center(child: Text('Erro: ${subsSnap.error}'));
           }
-          if (!snap.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final access = snap.data!;
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _StatusCard(access: access),
-              const SizedBox(height: 16),
-              _DetailsCard(access: access),
-              if (access.entitlements.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                _EntitlementsCard(access: access),
-              ],
-              const SizedBox(height: 24),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const PlansPage()),
-                ),
-                icon: const Icon(Icons.workspace_premium),
-                label: const Text('Ver planos disponíveis'),
-              ),
-            ],
+
+          final pastDueSub = _findPastDueSubscription(subsSnap.data ?? []);
+
+          return StreamBuilder<CommercialAccessSnapshot>(
+            stream: service.watchAccess(user.uid),
+            builder: (context, snap) {
+              if (snap.hasError) {
+                return Center(child: Text('Erro: ${snap.error}'));
+              }
+              if (!snap.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final access = snap.data!;
+              final uiStatus = pastDueSub != null
+                  ? SubscriptionDisplayStatus.pastDue
+                  : access.displayStatus;
+
+              return ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  if (pastDueSub != null) ...[
+                    _PastDueAlertCard(
+                      onRegularize: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const PlansPage()),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  _StatusCard(access: access, displayStatus: uiStatus),
+                  const SizedBox(height: 16),
+                  _DetailsCard(access: access, displayStatus: uiStatus),
+                  if (access.entitlements.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _EntitlementsCard(access: access),
+                  ],
+                  const SizedBox(height: 24),
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const PlansPage()),
+                    ),
+                    icon: const Icon(Icons.workspace_premium),
+                    label: Text(
+                      pastDueSub != null
+                          ? 'Regularizar pagamento'
+                          : 'Ver planos disponíveis',
+                    ),
+                  ),
+                ],
+              );
+            },
           );
         },
       ),
@@ -69,15 +101,75 @@ class MySubscriptionPage extends StatelessWidget {
   }
 }
 
+Subscription? _findPastDueSubscription(List<Subscription> subscriptions) {
+  for (final s in subscriptions) {
+    if (s.status == SubscriptionStatus.pastDue) return s;
+  }
+  return null;
+}
+
+class _PastDueAlertCard extends StatelessWidget {
+  const _PastDueAlertCard({required this.onRegularize});
+
+  final VoidCallback onRegularize;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: const Color(0xFFFEF3C7),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Color(0xFFB45309)),
+                SizedBox(width: 8),
+                Text(
+                  'Pagamento em atraso',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: Color(0xFFB45309),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Identificamos pendência no pagamento da assinatura. '
+              'Regularize no Mercado Pago para evitar interrupção do Premium.',
+              style: TextStyle(color: Colors.grey.shade800, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: onRegularize,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFB45309),
+              ),
+              child: const Text('Regularizar pagamento'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.access});
+  const _StatusCard({
+    required this.access,
+    required this.displayStatus,
+  });
 
   final CommercialAccessSnapshot access;
+  final SubscriptionDisplayStatus displayStatus;
 
   @override
   Widget build(BuildContext context) {
     final planName = access.plan?.name ??
-        (access.displayStatus == SubscriptionDisplayStatus.free
+        (displayStatus == SubscriptionDisplayStatus.free
             ? CommercialPlanCatalog.freePlan.name
             : 'Premium');
 
@@ -100,12 +192,12 @@ class _StatusCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                CommercialStatusChip(status: access.displayStatus),
+                CommercialStatusChip(status: displayStatus),
               ],
             ),
             const SizedBox(height: 12),
             Text(
-              _statusDescription(access.displayStatus),
+              _statusDescription(displayStatus, access),
               style: TextStyle(color: Colors.grey.shade700),
             ),
           ],
@@ -114,12 +206,21 @@ class _StatusCard extends StatelessWidget {
     );
   }
 
-  String _statusDescription(SubscriptionDisplayStatus status) {
+  String _statusDescription(
+    SubscriptionDisplayStatus status,
+    CommercialAccessSnapshot access,
+  ) {
     switch (status) {
       case SubscriptionDisplayStatus.free:
         return 'Você está no plano gratuito com acesso aos recursos essenciais.';
       case SubscriptionDisplayStatus.active:
         return 'Sua assinatura Premium está ativa.';
+      case SubscriptionDisplayStatus.pastDue:
+        if (access.hasPremiumAccess) {
+          return 'Há pendência no pagamento. Seu acesso Premium pode continuar '
+              'ativo por enquanto — regularize o quanto antes.';
+        }
+        return 'Pagamento em atraso. Regularize para manter o Premium.';
       case SubscriptionDisplayStatus.expired:
         return 'Sua assinatura expirou. Renove para continuar com benefícios Premium.';
       case SubscriptionDisplayStatus.lifetime:
@@ -133,9 +234,13 @@ class _StatusCard extends StatelessWidget {
 }
 
 class _DetailsCard extends StatelessWidget {
-  const _DetailsCard({required this.access});
+  const _DetailsCard({
+    required this.access,
+    required this.displayStatus,
+  });
 
   final CommercialAccessSnapshot access;
+  final SubscriptionDisplayStatus displayStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -178,14 +283,14 @@ class _DetailsCard extends StatelessWidget {
   }
 
   String _planLabel() {
-    if (access.displayStatus == SubscriptionDisplayStatus.free) {
+    if (displayStatus == SubscriptionDisplayStatus.free) {
       return CommercialPlanCatalog.freePlan.name;
     }
     return access.plan?.name ?? 'Premium';
   }
 
   String _formatExpiry() {
-    if (access.displayStatus == SubscriptionDisplayStatus.lifetime) {
+    if (displayStatus == SubscriptionDisplayStatus.lifetime) {
       return 'Vitalício';
     }
     return _formatDate(access.expiresAt);

@@ -1,6 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import 'package:flutter_application_1/models/flashcard_materia_stat.dart';
+import 'package:flutter_application_1/services/questao_materia_stats_service.dart';
 import 'admin_questoes_subtemas_page.dart';
 import 'criar_questao_page.dart';
 
@@ -13,16 +14,14 @@ class AdminQuestoesMateriasPage extends StatefulWidget {
 }
 
 class _AdminQuestoesMateriasPageState extends State<AdminQuestoesMateriasPage> {
-  Map<String, int> _agruparMaterias(List<QueryDocumentSnapshot> docs) {
-    final Map<String, int> mapa = {};
-    for (final doc in docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final materia = (data['materia'] ?? '').toString().trim();
-      if (materia.isNotEmpty) {
-        mapa[materia] = (mapa[materia] ?? 0) + 1;
-      }
-    }
-    return mapa;
+  final _materiaStats = QuestaoMateriaStatsService.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _materiaStats.ensureSeededIfEmpty();
+    });
   }
 
   void _abrirSubtemas(String materia) {
@@ -55,8 +54,8 @@ class _AdminQuestoesMateriasPageState extends State<AdminQuestoesMateriasPage> {
         icon: const Icon(Icons.add),
         label: const Text('Nova questão'),
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('questoes').snapshots(),
+      body: StreamBuilder<List<FlashcardMateriaStat>>(
+        stream: _materiaStats.watchMateriaStats(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(
@@ -73,11 +72,8 @@ class _AdminQuestoesMateriasPageState extends State<AdminQuestoesMateriasPage> {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final docs = snapshot.data!.docs;
-          final materiasMap = _agruparMaterias(docs);
-          final materias = materiasMap.keys.toList()..sort();
-
-          if (materias.isEmpty) {
+          final stats = snapshot.data!;
+          if (stats.isEmpty) {
             return const Center(
               child: Text('Nenhuma questão cadastrada ainda.'),
             );
@@ -85,10 +81,11 @@ class _AdminQuestoesMateriasPageState extends State<AdminQuestoesMateriasPage> {
 
           return ListView.builder(
             padding: const EdgeInsets.all(16),
-            itemCount: materias.length,
+            itemCount: stats.length,
             itemBuilder: (context, index) {
-              final materia = materias[index];
-              final total = materiasMap[materia] ?? 0;
+              final stat = stats[index];
+              final materia = stat.name;
+              final total = stat.total;
 
               return Card(
                 elevation: 3,

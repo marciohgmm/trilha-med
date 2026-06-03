@@ -2,6 +2,10 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:flutter/foundation.dart';
 
 /// Configuração de App Check via `--dart-define` (sem ativar debug em release).
+///
+/// **Produção:** após release, ativar enforcement no Firebase Console para
+/// Authentication, Firestore, Functions e Storage — ver
+/// [docs/APP_CHECK_PRODUCTION_ENFORCEMENT.md](../../docs/APP_CHECK_PRODUCTION_ENFORCEMENT.md).
 class AppCheckConfig {
   const AppCheckConfig({
     required this.useDebugProvider,

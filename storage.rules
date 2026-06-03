@@ -1,8 +1,8 @@
 rules_version = '2';
 
 // App Check: o SDK Flutter envia token quando App Check está ativo no app.
-// Enforcement adicional é feita no Firebase Console (Storage → App Check).
-// Quando Enforced, clientes sem token válido falham antes destas rules.
+// Enforcement em produção: Firebase Console → App Check → Enforce (Auth, Firestore,
+// Functions, Storage). Checklist: docs/APP_CHECK_PRODUCTION_ENFORCEMENT.md
 // request.app fica disponível para defesa em profundidade (opcional):
 //   function appCheckPresent() { return request.app != null; }
 // Não exigimos request.app nas rules para não quebrar dev sem token registrado.
@@ -41,8 +41,52 @@ service firebase.storage {
       return isAppAdmin();
     }
 
+    function userEntitlementPath(userId, entitlementDocId) {
+      return /databases/(default)/documents/users/$(userId)/platform_entitlements/$(entitlementDocId);
+    }
+
+    function userEntitlementActive(userId, entitlementDocId, expectedKey) {
+      return firestore.exists(userEntitlementPath(userId, entitlementDocId))
+        && firestore.get(userEntitlementPath(userId, entitlementDocId)).data.get('isActive', false) == true
+        && firestore.get(userEntitlementPath(userId, entitlementDocId)).data.get('key', '') == expectedKey
+        && (
+          !('expiresAt' in firestore.get(userEntitlementPath(userId, entitlementDocId)).data)
+          || firestore.get(userEntitlementPath(userId, entitlementDocId)).data.expiresAt == null
+          || firestore.get(userEntitlementPath(userId, entitlementDocId)).data.expiresAt > request.time
+        );
+    }
+
+    function hasPremium() {
+      return isSignedIn()
+        && (
+          isAppAdmin()
+          || userEntitlementActive(request.auth.uid, 'premium', 'premium')
+          || userEntitlementActive(request.auth.uid, 'premium_lifetime', 'premium_lifetime')
+          || userEntitlementActive(request.auth.uid, 'courtesy_access', 'courtesy_access')
+          || userEntitlementActive(request.auth.uid, 'beta_tester', 'beta_tester')
+        );
+    }
+
+    function practicalPhaseModelPath(modelId) {
+      return /databases/(default)/documents/practical_phase_models/$(modelId);
+    }
+
+    function canReadPracticalPhaseStorage(modelId) {
+      return isAppAdmin()
+        || (
+          isSignedIn()
+          && firestore.exists(practicalPhaseModelPath(modelId))
+          && firestore.get(practicalPhaseModelPath(modelId)).data.get('isPublished', false) == true
+          && firestore.get(practicalPhaseModelPath(modelId)).data.get('isActive', false) == true
+          && (
+            firestore.get(practicalPhaseModelPath(modelId)).data.get('requiresPremium', false) != true
+            || hasPremium()
+          )
+        );
+    }
+
     match /practical_phase/{modelId}/{allPaths=**} {
-      allow read: if isSignedIn();
+      allow read: if canReadPracticalPhaseStorage(modelId);
       allow write: if isAppAdmin()
         && request.resource.size < 10 * 1024 * 1024;
     }

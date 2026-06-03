@@ -1,4 +1,4 @@
-# Plano de expansão — Trilha Med / Revalida Cards
+# Plano de expansão — Trilha Med
 
 **Data:** 2026-05-19  
 **Papel:** Arquitetura preparatória (sem alterar comportamento atual do app)

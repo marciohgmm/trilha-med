@@ -1,4 +1,4 @@
-# Auditoria de monetização — Trilha Med / Revalida Cards
+# Auditoria de monetização — Trilha Med
 
 **Data:** 2026-05-19  
 **Modo:** Somente leitura — **nenhum código alterado**  

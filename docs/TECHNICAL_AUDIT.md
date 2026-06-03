@@ -1,4 +1,4 @@
-# Auditoria Técnica — Trilha Med / Revalida Cards
+# Auditoria Técnica — Trilha Med
 
 **Data:** 2026-05-19  
 **Escopo:** Análise estática do repositório (sem alteração de código).  

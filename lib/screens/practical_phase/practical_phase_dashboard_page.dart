@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../application/platform/platform_registry.dart';
 import '../../models/practical_phase_model.dart';
 import '../../services/practical_phase_service.dart';
+import '../../widgets/practical_phase/practical_phase_access_error.dart';
 import '../../widgets/practical_phase/practical_phase_constants.dart';
 import '../../widgets/practical_phase/practical_phase_empty_state.dart';
 import '../../widgets/practical_phase/practical_phase_filters_bar.dart';
@@ -42,10 +44,36 @@ class _PracticalPhaseDashboardPageState
         foregroundColor: Colors.white,
         centerTitle: true,
       ),
-      body: StreamBuilder<List<PracticalPhaseModel>>(
-        stream: _service.streamPublished(),
-        builder: (context, snapshot) {
+      body: StreamBuilder(
+        stream: PlatformRegistry.instance.commercialAccess
+            .watchAccess(widget.userId),
+        builder: (context, accessSnap) {
+          if (accessSnap.hasError) {
+            return PracticalPhaseEmptyState(
+              title: 'Erro ao carregar',
+              message: '${accessSnap.error}',
+              icon: Icons.error_outline,
+              actionLabel: 'Voltar',
+              onAction: () => Navigator.pop(context),
+            );
+          }
+          if (!accessSnap.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final includePremium = accessSnap.data!.hasPremiumAccess;
+
+          return StreamBuilder<List<PracticalPhaseModel>>(
+            stream: _service.streamPublished(
+              includePremiumContent: includePremium,
+            ),
+            builder: (context, snapshot) {
           if (snapshot.hasError) {
+            if (PracticalPhaseAccessError.isPermissionDenied(snapshot.error)) {
+              return PracticalPhaseAccessError.permissionDenied(
+                context: context,
+                userId: widget.userId,
+              );
+            }
             return PracticalPhaseEmptyState(
               title: 'Erro ao carregar',
               message: '${snapshot.error}',
@@ -187,6 +215,8 @@ class _PracticalPhaseDashboardPageState
                 ],
               ),
             ),
+          );
+            },
           );
         },
       ),

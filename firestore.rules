@@ -5,7 +5,7 @@ rules_version = '2';
 // token válido são rejeitados na camada Firebase antes da avaliação das rules.
 // Login, premium, OSCE e Live Events continuam regidos por auth + estas rules.
 
-// Revalida Cards — Firestore Security Rules
+// Trilha Med — Firestore Security Rules
 // Admin: coleção `admins/{uid}` + criador marciohgmm@gmail.com (isFounder)
 
 service cloud.firestore {
@@ -46,6 +46,53 @@ service cloud.firestore {
 
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // -------------------------------------------------------------------------
+    // Premium — entitlements em users/{uid}/platform_entitlements/{docId}
+    // Doc IDs estáveis (key): premium, premium_lifetime, courtesy_access, beta_tester
+    // -------------------------------------------------------------------------
+    function userEntitlementPath(userId, entitlementDocId) {
+      return /databases/$(database)/documents/users/$(userId)/platform_entitlements/$(entitlementDocId);
+    }
+
+    function userEntitlementActive(userId, entitlementDocId, expectedKey) {
+      return exists(userEntitlementPath(userId, entitlementDocId))
+        && get(userEntitlementPath(userId, entitlementDocId)).data.get('isActive', false) == true
+        && get(userEntitlementPath(userId, entitlementDocId)).data.get('key', '') == expectedKey
+        && (
+          !('expiresAt' in get(userEntitlementPath(userId, entitlementDocId)).data)
+          || get(userEntitlementPath(userId, entitlementDocId)).data.expiresAt == null
+          || get(userEntitlementPath(userId, entitlementDocId)).data.expiresAt > request.time
+        );
+    }
+
+    function hasPremium() {
+      return isSignedIn()
+        && (
+          isAppAdmin()
+          || userEntitlementActive(request.auth.uid, 'premium', 'premium')
+          || userEntitlementActive(request.auth.uid, 'premium_lifetime', 'premium_lifetime')
+          || userEntitlementActive(request.auth.uid, 'courtesy_access', 'courtesy_access')
+          || userEntitlementActive(request.auth.uid, 'beta_tester', 'beta_tester')
+        );
+    }
+
+    function practicalPhaseContentRequiresPremium() {
+      return resource.data.get('requiresPremium', false) == true;
+    }
+
+    function canReadPracticalPhaseStudentContent() {
+      return isAppAdmin()
+        || (
+          isSignedIn()
+          && resource.data.isPublished == true
+          && resource.data.isActive == true
+          && (
+            !practicalPhaseContentRequiresPremium()
+            || hasPremium()
+          )
+        );
     }
 
     // P0-A — campos de privilégio: somente isAppAdmin() pode alterar.
@@ -251,21 +298,13 @@ service cloud.firestore {
     // Fase Prática — modelos detalhados (OSCE / simulações)
     // -------------------------------------------------------------------------
     match /practical_phase_models/{modelId} {
-      allow read: if isSignedIn()
-        && (
-          isAppAdmin()
-          || (resource.data.isPublished == true && resource.data.isActive == true)
-        );
+      allow read: if canReadPracticalPhaseStudentContent();
       allow create, update, delete: if isAppAdmin();
     }
 
     // Módulos/cards da landing da Fase Prática
     match /practical_phase_modules/{moduleId} {
-      allow read: if isSignedIn()
-        && (
-          isAppAdmin()
-          || (resource.data.isPublished == true && resource.data.isActive == true)
-        );
+      allow read: if canReadPracticalPhaseStudentContent();
       allow create, update, delete: if isAppAdmin();
     }
 
@@ -633,7 +672,8 @@ service cloud.firestore {
 
     match /platform_audit_logs/{logId} {
       allow read: if isAppAdmin();
-      allow create: if isSignedIn();
+      // Append-only: Admin SDK (Functions) ou painel admin autenticado.
+      allow create: if isAppAdmin();
       allow update, delete: if false;
     }
 
@@ -647,7 +687,8 @@ service cloud.firestore {
 
     match /platform_analytics_daily/{dayId} {
       allow read: if isAppAdmin();
-      allow create, update: if isSignedIn();
+      // Agregados do doc raiz: apenas Admin SDK (scheduled) ou admin manual.
+      allow create, update: if isAppAdmin();
       allow delete: if isAppAdmin();
 
       match /active_users/{userId} {

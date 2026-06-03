@@ -5,31 +5,29 @@ import 'package:flutter/material.dart';
 
 
 import '../../services/analytics/app_analytics_service.dart';
-
+import '../../utils/checkout_route_parser.dart';
 import 'my_subscription_page.dart';
 
-
-
 /// Página exibida após retorno do Checkout Pro (deep link / web).
-
 class CheckoutReturnPage extends StatefulWidget {
-
   const CheckoutReturnPage({
-
     super.key,
-
     required this.status,
-
     this.planId,
-
     this.paymentId,
-
     this.amount,
-
     this.billingPeriod,
-
   });
 
+  factory CheckoutReturnPage.fromRouteArgs(CheckoutRouteArgs args) {
+    return CheckoutReturnPage(
+      status: args.status,
+      planId: args.planId,
+      paymentId: args.paymentId,
+      amount: args.amount,
+      billingPeriod: args.billingPeriod,
+    );
+  }
 
 
   final CheckoutReturnStatus status;

@@ -13,13 +13,26 @@ class PracticalPhaseModuleService {
   CollectionReference<Map<String, dynamic>> get _col =>
       _db.collection(collection);
 
-  Stream<List<PracticalPhaseModule>> streamPublished() {
-    return _col.orderBy('order').snapshots().map((snap) {
-      return snap.docs
-          .map((d) => PracticalPhaseModule.fromMap(d.id, d.data()))
-          .where((m) => m.visibleToStudents)
-          .toList();
-    });
+  Stream<List<PracticalPhaseModule>> streamPublished({
+    bool includePremiumContent = true,
+  }) {
+    if (includePremiumContent) {
+      return _col.orderBy('order').snapshots().map((snap) {
+        return snap.docs
+            .map((d) => PracticalPhaseModule.fromMap(d.id, d.data()))
+            .where((m) => m.visibleToStudents)
+            .toList();
+      });
+    }
+    return _col
+        .where('isPublished', isEqualTo: true)
+        .where('isActive', isEqualTo: true)
+        .where('requiresPremium', isEqualTo: false)
+        .orderBy('order')
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((d) => PracticalPhaseModule.fromMap(d.id, d.data()))
+            .toList());
   }
 
   Stream<List<PracticalPhaseModule>> streamAllAdmin() {

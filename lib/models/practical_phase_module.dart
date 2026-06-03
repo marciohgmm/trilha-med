@@ -11,6 +11,7 @@ class PracticalPhaseModule {
   final int order;
   final bool isActive;
   final bool isPublished;
+  final bool requiresPremium;
   final String? imageUrl;
   final String? pdfUrl;
   final String? videoUrl;
@@ -26,6 +27,7 @@ class PracticalPhaseModule {
     this.order = 0,
     this.isActive = true,
     this.isPublished = true,
+    this.requiresPremium = false,
     this.imageUrl,
     this.pdfUrl,
     this.videoUrl,
@@ -73,6 +75,7 @@ class PracticalPhaseModule {
         'order': order,
         'isActive': isActive,
         'isPublished': isPublished,
+        'requiresPremium': requiresPremium,
         'imageUrl': imageUrl,
         'pdfUrl': pdfUrl,
         'videoUrl': videoUrl,

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../application/platform/platform_registry.dart';
 import '../../core/analytics/analytics_events.dart';
+import '../../widgets/practical_phase/practical_phase_access_error.dart';
 import '../../core/analytics/analytics_feature_tracker.dart';
 import '../../models/practical_phase_module.dart';
 import '../../services/practical_phase_module_service.dart';
@@ -61,10 +63,27 @@ class _PracticalPhaseLandingPageState extends State<PracticalPhaseLandingPage>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: PracticalPhaseColors.background,
-      body: StreamBuilder<List<PracticalPhaseModule>>(
-        stream: _moduleService.streamPublished(),
-        builder: (context, snapshot) {
+      body: StreamBuilder(
+        stream: PlatformRegistry.instance.commercialAccess
+            .watchAccess(widget.userId),
+        builder: (context, accessSnap) {
+          if (!accessSnap.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final includePremium = accessSnap.data!.hasPremiumAccess;
+
+          return StreamBuilder<List<PracticalPhaseModule>>(
+            stream: _moduleService.streamPublished(
+              includePremiumContent: includePremium,
+            ),
+            builder: (context, snapshot) {
           if (snapshot.hasError) {
+            if (PracticalPhaseAccessError.isPermissionDenied(snapshot.error)) {
+              return PracticalPhaseAccessError.permissionDenied(
+                context: context,
+                userId: widget.userId,
+              );
+            }
             return Center(child: Text('Erro: ${snapshot.error}'));
           }
           final modules = snapshot.data ?? [];
@@ -118,6 +137,8 @@ class _PracticalPhaseLandingPageState extends State<PracticalPhaseLandingPage>
                 }),
               const SliverToBoxAdapter(child: SizedBox(height: 48)),
             ],
+          );
+            },
           );
         },
       ),

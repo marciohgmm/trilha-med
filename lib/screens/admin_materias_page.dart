@@ -1,9 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/models/flashcard_materia_stat.dart';
 import 'package:flutter_application_1/services/firebase_service.dart';
+import 'package:flutter_application_1/services/flashcard_materia_stats_service.dart';
 import 'criar_flashcard_page.dart';
 import 'admin_subtemas_page.dart';
-import 'package:flutter_application_1/utils/content_hierarchy_utils.dart';
 
 class AdminMateriasPage extends StatefulWidget {
   const AdminMateriasPage({super.key});
@@ -14,19 +15,14 @@ class AdminMateriasPage extends StatefulWidget {
 
 class _AdminMateriasPageState extends State<AdminMateriasPage> {
   final FirebaseService _firebaseService = FirebaseService();
-  Map<String, int> _agruparMaterias(List<QueryDocumentSnapshot> docs) {
-    final Map<String, int> mapa = {};
+  final _materiaStats = FlashcardMateriaStatsService.instance;
 
-    for (final doc in docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final materia = (data['materia'] ?? '').toString().trim();
-
-      if (materia.isNotEmpty) {
-        mapa[materia] = (mapa[materia] ?? 0) + 1;
-      }
-    }
-
-    return mapa;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _materiaStats.ensureSeededIfEmpty();
+    });
   }
 
   Future<void> _renomearMateria(String materiaAtual) async {
@@ -169,19 +165,18 @@ class _AdminMateriasPageState extends State<AdminMateriasPage> {
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('flashcards').snapshots(),
+      body: StreamBuilder<List<FlashcardMateriaStat>>(
+        stream: _materiaStats.watchMateriaStats(),
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(child: Text('Erro: ${snapshot.error}'));
+          }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final docs = snapshot.data!.docs;
-          final materiasMap = _agruparMaterias(docs);
-          final materias =
-              ContentHierarchyUtils.sortAlphabetically(materiasMap.keys);
-
-          if (materias.isEmpty) {
+          final stats = snapshot.data!;
+          if (stats.isEmpty) {
             return const Center(
               child: Text("Nenhum conteúdo cadastrado ainda"),
             );
@@ -189,10 +184,11 @@ class _AdminMateriasPageState extends State<AdminMateriasPage> {
 
           return ListView.builder(
             padding: const EdgeInsets.all(16),
-            itemCount: materias.length,
+            itemCount: stats.length,
             itemBuilder: (context, index) {
-              final materia = materias[index];
-              final total = materiasMap[materia] ?? 0;
+              final stat = stats[index];
+              final materia = stat.name;
+              final total = stat.total;
 
               return Card(
                 elevation: 3,

@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart' show FlutterQuillLocalizations;
 
@@ -15,8 +16,10 @@ import 'services/analytics/app_analytics_service.dart';
 import 'services/push/fcm_service.dart';
 import 'services/firestore_init.dart';
 import 'services/study_timer_service.dart';
+import 'screens/commercial/checkout_return_page.dart';
 import 'screens/login_page.dart';
 import 'screens/main_navigation_page.dart';
+import 'utils/checkout_route_parser.dart';
 import 'widgets/legal/legal_acceptance_gate.dart';
 
 Future<void> main() async {
@@ -138,11 +141,38 @@ class TrilhaMedApp extends StatelessWidget {
               child: child ?? const SizedBox.shrink(),
             );
           },
-          home: const AuthCheck(),
+          initialRoute: CheckoutRouteParser.resolveInitialRoute(),
+          onGenerateRoute: _onGenerateRoute,
         );
       },
     );
   }
+}
+
+Route<dynamic>? _onGenerateRoute(RouteSettings settings) {
+  final checkoutArgs = CheckoutRouteParser.tryParseRouteSettings(settings.name);
+  if (checkoutArgs != null) {
+    return MaterialPageRoute<void>(
+      settings: settings,
+      builder: (_) => CheckoutReturnPage.fromRouteArgs(checkoutArgs),
+    );
+  }
+
+  final name = settings.name ?? '/';
+  if (name == '/' || name.isEmpty) {
+    return MaterialPageRoute<void>(
+      settings: settings,
+      builder: (_) => const AuthCheck(),
+    );
+  }
+
+  if (kDebugMode) {
+    debugPrint('[TrilhaMedApp] rota desconhecida "$name" — fallback AuthCheck');
+  }
+  return MaterialPageRoute<void>(
+    settings: settings,
+    builder: (_) => const AuthCheck(),
+  );
 }
 
 /// Widget de debug legado — **não** usar em [runApp]. Mantido para rollback local.

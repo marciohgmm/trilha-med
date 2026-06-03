@@ -27,7 +27,7 @@ class PrivacyPolicyPage extends StatelessWidget {
           const _Section(
             title: '1. Controlador',
             body:
-                'O aplicativo Trilha Med / Revalida Cards é operado para fins educacionais '
+                'O aplicativo Trilha Med é operado para fins educacionais '
                 'de preparação para exames. Para questões de privacidade e direitos do titular, '
                 'entre em contato: ${LegalVersions.privacyContactEmail}.',
           ),

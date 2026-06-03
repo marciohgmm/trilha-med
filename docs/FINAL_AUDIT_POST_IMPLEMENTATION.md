@@ -1,4 +1,4 @@
-# Auditoria final pós-implementação — Trilha Med / Revalida Cards
+# Auditoria final pós-implementação — Trilha Med
 
 **Data:** 2026-05-19  
 **Escopo:** R1, F4, V2, S2, S3, S1, F1, Live Events Host Único, RBAC, Painel Mestre  

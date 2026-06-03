@@ -66,40 +66,12 @@
       ]
     },
     {
-      "collectionGroup": "platform_ad_campaigns",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "priority", "order": "DESCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "platform_advertisements",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "placement", "order": "ASCENDING" },
         { "fieldPath": "isActive", "order": "ASCENDING" },
         { "fieldPath": "priority", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "platform_rbac_roles",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "priority", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "platform_notifications",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "platform_analytics_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
     {
@@ -111,60 +83,11 @@
       ]
     },
     {
-      "collectionGroup": "platform_push_campaigns",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "platform_fcm_users",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "lastActiveAt", "order": "DESCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "cronograma_itens",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
         { "fieldPath": "dataEstudo", "order": "ASCENDING" },
         { "fieldPath": "concluidoHoje", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "live_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "scheduledAt", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "flashcards_materia_stats",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "name", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "flashcards_subtema_catalog",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "materia", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "questoes_materia_stats",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "name", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "questoes_subtema_catalog",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "materia", "order": "ASCENDING" }
       ]
     },
     {
@@ -181,6 +104,26 @@
       "fields": [
         { "fieldPath": "uid", "order": "ASCENDING" },
         { "fieldPath": "finishedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "practical_phase_models",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isPublished", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "requiresPremium", "order": "ASCENDING" },
+        { "fieldPath": "order", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "practical_phase_modules",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isPublished", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "requiresPremium", "order": "ASCENDING" },
+        { "fieldPath": "order", "order": "ASCENDING" }
       ]
     }
   ],

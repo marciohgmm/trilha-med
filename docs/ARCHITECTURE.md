@@ -1,4 +1,4 @@
-# Arquitetura — Trilha Med / Revalida Cards
+# Arquitetura — Trilha Med
 
 Documentação da estrutura do aplicativo e do **módulo plataforma** preparado para crescimento comercial.
 

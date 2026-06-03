@@ -15,7 +15,10 @@ class PracticalPhaseService {
 
   Stream<List<PracticalPhaseModel>> streamAllAdmin() => _repo.watchAll();
 
-  Stream<List<PracticalPhaseModel>> streamPublished() => _repo.watchPublished();
+  Stream<List<PracticalPhaseModel>> streamPublished({
+    bool includePremiumContent = true,
+  }) =>
+      _repo.watchPublished(includePremiumContent: includePremiumContent);
 
   Future<PracticalPhaseModel?> getById(String id) => _repo.getById(id);
 

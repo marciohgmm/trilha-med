@@ -6,5 +6,5 @@ abstract final class LegalVersions {
   static const String termsVersion = '2026-05-19';
 
   /// Canal para exercício de direitos LGPD (Art. 18).
-  static const String privacyContactEmail = 'privacidade@revalidacards.com.br';
+  static const String privacyContactEmail = 'privacidade@trilhamed.com.br';
 }

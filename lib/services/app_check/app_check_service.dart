@@ -6,6 +6,9 @@ import 'package:flutter/foundation.dart';
 import '../../core/app_check/app_check_config.dart';
 
 /// Inicializa Firebase App Check no arranque (antes de Firestore/Functions sensíveis).
+///
+/// Enforcement no Console (Auth, Firestore, Functions, Storage) é obrigatório em
+/// produção — checklist: `docs/APP_CHECK_PRODUCTION_ENFORCEMENT.md`.
 class AppCheckService {
   AppCheckService._();
   static final AppCheckService instance = AppCheckService._();

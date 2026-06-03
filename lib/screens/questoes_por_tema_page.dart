@@ -13,6 +13,8 @@ import 'estatisticas_questoes_page.dart';
 import 'login_page.dart';
 import 'simulado/simulado_filtros_page.dart';
 import 'simulado/simulado_historico_page.dart';
+import 'revalida_official/revalida_official_landing_page.dart';
+import '../widgets/revalida_official/revalida_official_entry_card.dart';
 
 class QuestoesPorTemaPage extends StatefulWidget {
   final String userId;
@@ -166,10 +168,23 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Escolha uma matéria ou faça um simulado personalizado.',
+                    'Simulado oficial, simulado personalizado ou estudo por matéria.',
                     style: TextStyle(fontSize: 16, color: Colors.black87),
                   ),
                   const SizedBox(height: 16),
+                  RevalidaOfficialEntryCard(
+                    onOpen: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => RevalidaOfficialLandingPage(
+                            userId: widget.userId,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 14),
                   FeatureGate(
                     moduleId: FeatureModules.simulados,
                     onEnabled: () {
@@ -191,7 +206,7 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
                         label: const Padding(
                           padding: EdgeInsets.symmetric(vertical: 14),
                           child: Text(
-                            'Fazer Simulado',
+                            'Simulado personalizado',
                             style: TextStyle(
                               fontSize: 17,
                               fontWeight: FontWeight.bold,
@@ -263,10 +278,45 @@ class _QuestoesPorTemaPageState extends State<QuestoesPorTemaPage> {
                                 ..sort((a, b) => a.name.compareTo(b.name));
 
                               if (filteredMaterias.isEmpty) {
-                                return const Center(
-                                  child: Text(
-                                    'Nenhuma matéria encontrada.',
-                                    textAlign: TextAlign.center,
+                                final hasStats = stats.isNotEmpty;
+                                return Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(24),
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          hasStats
+                                              ? Icons.search_off
+                                              : Icons.menu_book_outlined,
+                                          size: 48,
+                                          color: Colors.grey.shade600,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          hasStats
+                                              ? 'Nenhuma matéria encontrada para sua busca.'
+                                              : 'Nenhuma matéria com questões disponível no momento.',
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                        if (!hasStats) ...[
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            'Se você é administrador, abra o painel admin '
+                                            'para sincronizar o catálogo de questões.',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: Colors.grey.shade700,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
                                   ),
                                 );
                               }

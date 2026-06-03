@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/practical_phase_model.dart';
 import '../../services/practical_phase_service.dart';
+import '../../widgets/practical_phase/practical_phase_access_error.dart';
 import '../../widgets/practical_phase/practical_phase_constants.dart';
 import '../../widgets/practical_phase/practical_phase_premium_gate.dart';
 
@@ -58,6 +59,12 @@ class _PracticalPhaseDetailContent extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
+          if (PracticalPhaseAccessError.isPermissionDenied(snapshot.error)) {
+            return PracticalPhaseAccessError.permissionDenied(
+              context: context,
+              userId: userId,
+            );
+          }
           return Center(child: Text('Erro: ${snapshot.error}'));
         }
         final model = snapshot.data;

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/constants/firestore_paths.dart';
 import '../models/flashcard_materia_stat.dart';
+import '../services/auth/admin_auth_service.dart';
 import '../utils/content_hierarchy_utils.dart';
 
 /// Catálogo agregado por matéria para questões (lista de matérias / simulado).
@@ -42,6 +43,8 @@ class QuestaoMateriaStatsService {
     try {
       final probe = await _statsCol.limit(1).get();
       if (probe.docs.isNotEmpty) return;
+      final access = await AdminAuthService().resolveAccess();
+      if (!access.allowed) return;
       await rebuildFromQuestoes();
     } catch (e, st) {
       debugPrint('[QuestaoMateriaStatsService] ensureSeededIfEmpty: $e\n$st');

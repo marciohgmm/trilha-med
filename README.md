@@ -1,4 +1,4 @@
-# Revalida Cards (TrilhaMed)
+# Trilha Med
 
 Aplicativo Flutter para estudo (flashcards, questões, simulados, OSCE, fase prática, eventos ao vivo e módulo comercial).
 

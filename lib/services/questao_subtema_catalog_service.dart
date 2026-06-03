@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/constants/firestore_paths.dart';
 import '../models/questao_subtema_catalog_entry.dart';
+import '../services/auth/admin_auth_service.dart';
 import '../utils/content_hierarchy_utils.dart';
 
 /// Catálogo matéria/subtema para questões — evita varrer `questoes` na navegação.
@@ -51,6 +52,8 @@ class QuestaoSubtemaCatalogService {
     try {
       final probe = await _catalogCol.limit(1).get();
       if (probe.docs.isNotEmpty) return;
+      final access = await AdminAuthService().resolveAccess();
+      if (!access.allowed) return;
       await rebuildFromQuestoes();
     } catch (e, st) {
       debugPrint('[QuestaoSubtemaCatalogService] ensureSeededIfEmpty: $e\n$st');

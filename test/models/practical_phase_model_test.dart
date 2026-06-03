@@ -34,6 +34,44 @@ void main() {
       expect(out['isPublished'], isTrue);
     });
 
+    test('requiresPremium default false no fromMap legado', () {
+      final model = PracticalPhaseModel.fromMap('id', {
+        'title': 'T',
+        'slug': 's',
+        'description': '',
+        'category': '',
+        'specialty': '',
+        'difficulty': '',
+        'thumbnailUrl': '',
+        'isActive': true,
+        'isPublished': true,
+        'createdAt': Timestamp.now(),
+        'updatedAt': Timestamp.now(),
+        'createdBy': '',
+      });
+      expect(model.requiresPremium, isFalse);
+    });
+
+    test('requiresPremium roundtrip no toMap', () {
+      final model = PracticalPhaseModel(
+        id: 'x',
+        title: 'Premium',
+        slug: 'premium',
+        description: '',
+        category: '',
+        specialty: '',
+        difficulty: '',
+        thumbnailUrl: '',
+        isActive: true,
+        isPublished: true,
+        requiresPremium: true,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        createdBy: '',
+      );
+      expect(model.toMap()['requiresPremium'], isTrue);
+    });
+
     test('visibleToStudents exige ativo e publicado', () {
       final model = PracticalPhaseModel(
         id: 'x',

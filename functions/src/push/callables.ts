@@ -13,6 +13,54 @@ import { appCheckCallableOptions } from "../callableOptions";
 import { assertRateLimitForCallable } from "../rateLimit/assertRateLimit";
 import { RATE_LIMIT_ACTIONS } from "../rateLimit/rateLimitConfig";
 
+const PARTICIPANT_STATUS_ELIMINATED = "eliminated";
+
+/** Host do evento ou administrador da plataforma. */
+async function assertLiveEventHostOrAdmin(
+  uid: string,
+  email: string | null | undefined,
+  eventId: string,
+): Promise<void> {
+  const db = admin.firestore();
+  const eventSnap = await db.collection(COLLECTIONS.liveEvents).doc(eventId).get();
+  if (!eventSnap.exists) {
+    throw new HttpsError("not-found", "Evento não encontrado.");
+  }
+  const hostId = (eventSnap.data()?.hostId as string) ?? "";
+  if (hostId !== uid) {
+    await assertAppAdmin(uid, email);
+  }
+}
+
+/** Participante alvo deve existir no evento com status eliminated (anti-abuso de push). */
+async function assertLiveEventParticipantEliminated(
+  eventId: string,
+  targetUserId: string,
+): Promise<void> {
+  const db = admin.firestore();
+  const partSnap = await db
+    .collection(COLLECTIONS.liveEvents)
+    .doc(eventId)
+    .collection("participants")
+    .doc(targetUserId)
+    .get();
+
+  if (!partSnap.exists) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Participante não encontrado neste evento.",
+    );
+  }
+
+  const status = (partSnap.data()?.status as string) ?? "";
+  if (status !== PARTICIPANT_STATUS_ELIMINATED) {
+    throw new HttpsError(
+      "permission-denied",
+      "Notificação de eliminação exige participante com status eliminated.",
+    );
+  }
+}
+
 export const registerFcmToken = onCall(
   appCheckCallableOptions(),
   async (request) => {
@@ -181,7 +229,8 @@ export const notifyLiveEventBroadcast = onCall(
 export const notifyLiveEventUser = onCall(
   appCheckCallableOptions(),
   async (request) => {
-    if (!request.auth?.uid) throw new HttpsError("unauthenticated", "Login necessário.");
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Login necessário.");
 
     const userId = (request.data?.userId as string)?.trim();
     const eventId = (request.data?.eventId as string)?.trim();
@@ -189,23 +238,58 @@ export const notifyLiveEventUser = onCall(
       throw new HttpsError("invalid-argument", "userId e eventId obrigatórios.");
     }
 
+    const db = admin.firestore();
+    const eventSnap = await db.collection(COLLECTIONS.liveEvents).doc(eventId).get();
+    if (!eventSnap.exists) {
+      throw new HttpsError("not-found", "Evento não encontrado.");
+    }
+
+    const hostId = (eventSnap.data()?.hostId as string) ?? "";
+    const isHost = hostId === uid;
+    let isAdmin = false;
+    if (!isHost) {
+      try {
+        await assertAppAdmin(uid, request.auth?.token?.email);
+        isAdmin = true;
+      } catch {
+        throw new HttpsError(
+          "permission-denied",
+          "Apenas o host do evento ou um administrador pode enviar esta notificação.",
+        );
+      }
+    }
+
+    if (!isAdmin) {
+      await assertLiveEventParticipantEliminated(eventId, userId);
+    }
+
     const { getTokensForUser } = await import("./fcmSend");
     const tokens = await getTokensForUser(userId);
+    if (tokens.length === 0) {
+      console.warn(
+        `[notifyLiveEventUser] sem tokens FCM userId=${userId} eventId=${eventId}`,
+      );
+    }
     await sendPushToTokens(tokens, {
       title: "Você foi eliminado",
       body: "Não desanime — há mais eventos em breve!",
       type: PUSH_TYPES.liveEvent,
       eventId,
     });
-    return { ok: true };
+    return { ok: true, sent: tokens.length };
   },
 );
 
 export const scheduleLiveEventReminders = onCall(
   appCheckCallableOptions(),
   async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Login necessário.");
+
     const eventId = (request.data?.eventId as string)?.trim();
     if (!eventId) throw new HttpsError("invalid-argument", "eventId obrigatório.");
+
+    await assertLiveEventHostOrAdmin(uid, request.auth?.token?.email, eventId);
 
     const db = admin.firestore();
     await db.collection(COLLECTIONS.liveEvents).doc(eventId).set(

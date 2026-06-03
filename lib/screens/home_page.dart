@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:flutter_application_1/application/admin/admin_access_service.dart';
@@ -18,9 +19,8 @@ import 'busca_flashcard_delegate.dart';
 import 'package:flutter_application_1/models/flashcard_materia_stat.dart';
 import 'package:flutter_application_1/services/flashcard_materia_stats_service.dart';
 import 'package:flutter_application_1/widgets/events/events_section.dart';
-import 'osce/osce_lobby_page.dart';
 import 'medical_tools/medical_tools_page.dart';
-import 'revalida_official/revalida_official_landing_page.dart';
+import 'practical_phase/practical_phase_landing_page.dart';
 
 class HomePage extends StatefulWidget {
   final String userId;
@@ -68,7 +68,7 @@ class _HomePageState extends State<HomePage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => OsceLobbyPage(userId: widget.userId),
+        builder: (_) => PracticalPhaseLandingPage(userId: widget.userId),
       ),
     );
   }
@@ -78,15 +78,6 @@ class _HomePageState extends State<HomePage> {
       context,
       MaterialPageRoute(
         builder: (_) => const MedicalToolsPage(),
-      ),
-    );
-  }
-
-  void _abrirRevalidaOficial() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => RevalidaOfficialLandingPage(userId: widget.userId),
       ),
     );
   }
@@ -243,84 +234,6 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(height: 28),
                   FeatureGate(
-                    moduleId: FeatureModules.revalidaOfficialSimulator,
-                    onEnabled: _abrirRevalidaOficial,
-                    childBuilder: (onPressed) => Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF0D9488), Color(0xFF1E3A8A)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x400D9488),
-                            blurRadius: 16,
-                            offset: Offset(0, 6),
-                          ),
-                        ],
-                      ),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: onPressed,
-                          borderRadius: BorderRadius.circular(20),
-                          child: Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.2),
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                  child: const Icon(
-                                    Icons.school,
-                                    color: Colors.white,
-                                    size: 32,
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                const Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Simulado Revalida Oficial',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      SizedBox(height: 4),
-                                      Text(
-                                        '100 questões · 4h · modo prova',
-                                        style: TextStyle(
-                                          color: Colors.white70,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const Icon(
-                                  Icons.arrow_forward_ios,
-                                  color: Colors.white70,
-                                  size: 18,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  FeatureGate(
                     moduleId: FeatureModules.flashcards,
                     onEnabled: _abrirFlashcards,
                     childBuilder: (onPressed) => ElevatedButton.icon(
@@ -349,6 +262,31 @@ class _HomePageState extends State<HomePage> {
                   FeatureGate(
                     moduleId: FeatureModules.questoes,
                     onEnabled: _abrirQuestoes,
+                    hideWhenDisabled: false,
+                    disabledChild: Opacity(
+                      opacity: 0.5,
+                      child: ElevatedButton.icon(
+                        onPressed: null,
+                        icon: const Icon(Icons.quiz, size: 26),
+                        label: const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 16.0),
+                          child: Text(
+                            'Questões (indisponível)',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1E3A8A),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                      ),
+                    ),
                     childBuilder: (onPressed) => ElevatedButton.icon(
                       onPressed: onPressed,
                       icon: const Icon(Icons.quiz, size: 26),
@@ -435,18 +373,19 @@ class _HomePageState extends State<HomePage> {
                       displayName: displayName,
                     ),
                   ),
-                  // TEMP: debug admin — remover após validar acesso
-                  const SizedBox(height: 20),
-                  OutlinedButton.icon(
-                    onPressed: _abrirAdminTeste,
-                    icon: const Icon(Icons.admin_panel_settings),
-                    label: const Text('ABRIR ADMIN TESTE'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFDC2626),
-                      side: const BorderSide(color: Color(0xFFDC2626)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                  if (kDebugMode) ...[
+                    const SizedBox(height: 20),
+                    OutlinedButton.icon(
+                      onPressed: _abrirAdminTeste,
+                      icon: const Icon(Icons.admin_panel_settings),
+                      label: const Text('ABRIR ADMIN TESTE'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFDC2626),
+                        side: const BorderSide(color: Color(0xFFDC2626)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),

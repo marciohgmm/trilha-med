@@ -11,7 +11,10 @@ abstract class PracticalPhaseRepository {
 
   Stream<List<PracticalPhaseModel>> watchAll();
 
-  Stream<List<PracticalPhaseModel>> watchPublished();
+  /// [includePremiumContent] false evita reads negados em docs `requiresPremium` (usuário free).
+  Stream<List<PracticalPhaseModel>> watchPublished({
+    bool includePremiumContent = true,
+  });
 
   Future<PracticalPhaseModel?> getById(String id);
 
@@ -41,13 +44,23 @@ class FirestorePracticalPhaseRepository implements PracticalPhaseRepository {
   }
 
   @override
-  Stream<List<PracticalPhaseModel>> watchPublished() {
-    // Filtro publicado+ativo no cliente evita índice composto no Firestore.
-    return _col.orderBy('order').snapshots().map((snap) {
-      return _mapDocs(snap)
-          .where((m) => m.visibleToStudents)
-          .toList();
-    });
+  Stream<List<PracticalPhaseModel>> watchPublished({
+    bool includePremiumContent = true,
+  }) {
+    if (includePremiumContent) {
+      return _col.orderBy('order').snapshots().map((snap) {
+        return _mapDocs(snap)
+            .where((m) => m.visibleToStudents)
+            .toList();
+      });
+    }
+    return _col
+        .where('isPublished', isEqualTo: true)
+        .where('isActive', isEqualTo: true)
+        .where('requiresPremium', isEqualTo: false)
+        .orderBy('order')
+        .snapshots()
+        .map(_mapDocs);
   }
 
   List<PracticalPhaseModel> _mapDocs(QuerySnapshot<Map<String, dynamic>> snap) {

@@ -13,6 +13,8 @@ class PracticalPhaseModel {
   final String thumbnailUrl;
   final bool isActive;
   final bool isPublished;
+  /// Ausente no Firestore = gratuito (legado). `true` exige entitlement premium nas rules.
+  final bool requiresPremium;
   final DateTime createdAt;
   final DateTime updatedAt;
   final String createdBy;
@@ -31,6 +33,7 @@ class PracticalPhaseModel {
     required this.thumbnailUrl,
     required this.isActive,
     required this.isPublished,
+    this.requiresPremium = false,
     required this.createdAt,
     required this.updatedAt,
     required this.createdBy,
@@ -84,6 +87,7 @@ class PracticalPhaseModel {
       'thumbnailUrl': thumbnailUrl,
       'isActive': isActive,
       'isPublished': isPublished,
+      'requiresPremium': requiresPremium,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(updatedAt),
       'createdBy': createdBy,
@@ -104,6 +108,7 @@ class PracticalPhaseModel {
     String? thumbnailUrl,
     bool? isActive,
     bool? isPublished,
+    bool? requiresPremium,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? createdBy,
@@ -122,6 +127,7 @@ class PracticalPhaseModel {
       thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
       isActive: isActive ?? this.isActive,
       isPublished: isPublished ?? this.isPublished,
+      requiresPremium: requiresPremium ?? this.requiresPremium,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       createdBy: createdBy ?? this.createdBy,

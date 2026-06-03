@@ -3,7 +3,10 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as admin from "firebase-admin";
 import { mercadoPagoAccessToken } from "../config";
 import { COLLECTIONS, PAYMENT_STATUS } from "../constants";
-import { listPaymentsToReconcileForUser } from "../subscriptionService";
+import {
+  listPaymentsToReconcileForUser,
+  syncStablePremiumEntitlementMirrors,
+} from "../subscriptionService";
 import { reconcileLocalPaymentDoc } from "./paymentProcessor";
 import { logSubscription } from "./subscriptionLogger";
 import { appCheckCallableOptions } from "../callableOptions";
@@ -77,9 +80,12 @@ export const reconcileMyMercadoPagoPayments = onCall(
       repaired++;
     }
 
+    const entitlementsMirrored = await syncStablePremiumEntitlementMirrors(userId);
+
     return {
       reconciled: repaired,
       paymentIds,
+      entitlementsMirrored,
     };
   }
 );

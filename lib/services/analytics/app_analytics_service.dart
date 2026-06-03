@@ -546,15 +546,8 @@ class AppAnalyticsService {
 
           db.collection(FirestorePaths.platformAnalyticsDaily).doc(dayKey);
 
-      final increments = dailyIncrementsForEvent(name, parameters);
-
-      if (increments.length > 1) {
-
-        batch.set(dailyRef, increments, SetOptions(merge: true));
-
-      }
-
-
+      // Contadores diários no doc raiz: apenas Functions (Admin SDK).
+      // Cliente grava eventos brutos + presença em active_users (rules).
 
       if (name == AnalyticsEvents.sessionStart) {
 

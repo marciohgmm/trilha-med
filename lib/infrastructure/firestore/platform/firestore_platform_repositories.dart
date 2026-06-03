@@ -500,7 +500,7 @@ class _EntitlementRepo implements EntitlementRepository {
   @override
   Future<String> save(String userId, PlatformEntitlement entitlement) async {
     final ref = entitlement.id.isEmpty
-        ? _col(userId).doc()
+        ? _col(userId).doc(entitlement.key.key)
         : _col(userId).doc(entitlement.id);
     await ref.set({
       ...entitlement.toMap(),

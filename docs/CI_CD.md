@@ -1,4 +1,4 @@
-# CI/CD — TrilhaMed / Revalida Cards
+# CI/CD — Trilha Med
 
 Pipeline de **validação automática** em push e pull request. **Não há deploy automático** para Firebase, lojas ou hosting.
 
