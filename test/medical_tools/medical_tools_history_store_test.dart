@@ -26,7 +26,7 @@ void main() {
 
     test('append e loadForTool filtram por ferramenta', () async {
       await store.append(entry('1', 'adult_bmi'));
-      await store.append(entry('2', 'weight_dose'));
+      await store.append(entry('2', 'burns_rule_of_nine'));
       await store.append(entry('3', 'adult_bmi'));
 
       final bmi = await store.loadForTool('adult_bmi');

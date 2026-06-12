@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 
+import '../models/access_usage_stats.dart';
 import '../models/questao_model.dart';
+import '../core/access/app_access_feature.dart';
+import '../widgets/access/free_limit_reached_view.dart';
 import '../models/questao_exceptions.dart';
 import '../services/questao_service.dart';
 import '../utils/report_message_dialog.dart';
@@ -12,6 +15,7 @@ class QuestaoCard extends StatefulWidget {
   final bool showNextButton;
   final VoidCallback? onNext;
   final void Function(String alternativaId, bool acertou)? onAnswered;
+  final Future<ConsumeResult> Function(String questionId)? onBeforeAnswer;
 
   const QuestaoCard({
     super.key,
@@ -20,6 +24,7 @@ class QuestaoCard extends StatefulWidget {
     this.showNextButton = false,
     this.onNext,
     this.onAnswered,
+    this.onBeforeAnswer,
   });
 
   @override
@@ -35,13 +40,27 @@ class _QuestaoCardState extends State<QuestaoCard> {
 
   static const List<String> _labels = ['A', 'B', 'C', 'D', 'E'];
 
-  void _submitAnswer() {
+  Future<void> _submitAnswer() async {
     if (_selectedId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text('Selecione uma alternativa antes de responder.')),
       );
       return;
+    }
+
+    final onBefore = widget.onBeforeAnswer;
+    if (onBefore != null) {
+      final access = await onBefore(widget.questao.id);
+      if (!mounted) return;
+      if (!access.allowed) {
+        await showContentAccessBlockedFeedback(
+          context,
+          feature: AppAccessFeature.questions,
+          result: access,
+        );
+        return;
+      }
     }
 
     setState(() {

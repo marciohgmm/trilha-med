@@ -69,6 +69,9 @@ class FirestorePaths {
   static const platformRbacPermissions = 'platform_rbac_permissions';
   static const platformFeatureFlags = 'platform_feature_flags';
 
+  /// Configuração gratuito vs premium: `app_access_config/plans`
+  static const appAccessConfig = 'app_access_config';
+
   /// Subcoleção: `users/{userId}/platform_notifications/{id}`
   static const userPlatformNotifications = 'platform_notifications';
 
@@ -81,4 +84,22 @@ class FirestorePaths {
 
   /// Aceites legais (LGPD): `users/{userId}/legal_acceptances/{id}`
   static const legalAcceptances = 'legal_acceptances';
+
+  /// P0 — uso de cota gratuito: `users/{userId}/access_usage/stats`
+  static const userAccessUsage = 'access_usage';
+
+  static String userAccessUsageStatsPath(String userId) =>
+      '$users/$userId/$userAccessUsage/stats';
+
+  static String userAccessUsageFlashcardItemPath(
+    String userId,
+    String cardId,
+  ) =>
+      '$users/$userId/$userAccessUsage/flashcards/items/$cardId';
+
+  static String userAccessUsageQuestionItemPath(
+    String userId,
+    String questionId,
+  ) =>
+      '$users/$userId/$userAccessUsage/questions/items/$questionId';
 }

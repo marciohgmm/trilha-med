@@ -1,12 +1,17 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../widgets/access/content_access_flashcard_gate.dart';
+
 class TelaFlashcardsPorIds extends StatefulWidget {
   final List<String> flashcardIds;
+  final String? userId;
 
   const TelaFlashcardsPorIds({
     super.key,
     required this.flashcardIds,
+    this.userId,
   });
 
   @override
@@ -18,6 +23,9 @@ class _TelaFlashcardsPorIdsState extends State<TelaFlashcardsPorIds> {
   int indexAtual = 0;
   bool mostrarResposta = false;
   bool carregando = true;
+
+  String? get _userId =>
+      widget.userId ?? FirebaseAuth.instance.currentUser?.uid;
 
   @override
   void initState() {
@@ -94,12 +102,130 @@ class _TelaFlashcardsPorIdsState extends State<TelaFlashcardsPorIds> {
     }
 
     final card = flashcards[indexAtual];
+    final cardId = card['id']?.toString() ?? '';
     final pergunta = card['pergunta']?.toString() ?? '';
     final resposta = card['resposta']?.toString() ?? '';
     final explicacao = card['explicacao']?.toString() ?? '';
     final materia = card['materia']?.toString() ?? '';
     final tema = card['tema']?.toString() ?? '';
     final subtema = card['subtema']?.toString() ?? '';
+    final userId = _userId;
+
+    Widget body = Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          if (materia.isNotEmpty || tema.isNotEmpty || subtema.isNotEmpty)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8EEF9),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                [materia, tema, subtema]
+                    .where((item) => item.isNotEmpty)
+                    .join(' • '),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1E3A8A),
+                ),
+              ),
+            ),
+          Expanded(
+            child: Card(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Center(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          mostrarResposta ? resposta : pergunta,
+                          style: const TextStyle(fontSize: 18),
+                          textAlign: TextAlign.center,
+                        ),
+                        if (mostrarResposta && explicacao.isNotEmpty) ...[
+                          const SizedBox(height: 20),
+                          const Divider(),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Explicação',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1E3A8A),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            explicacao,
+                            style: const TextStyle(fontSize: 15),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  mostrarResposta = !mostrarResposta;
+                });
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E3A8A),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: Text(
+                mostrarResposta ? 'Ver pergunta' : 'Ver resposta',
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: indexAtual > 0 ? voltarCard : null,
+                  child: const Text('Anterior'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: proximoCard,
+                  child: const Text('Próximo'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    if (userId != null && cardId.isNotEmpty) {
+      body = ContentAccessFlashcardGate(
+        userId: userId,
+        cardId: cardId,
+        child: body,
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -107,113 +233,7 @@ class _TelaFlashcardsPorIdsState extends State<TelaFlashcardsPorIds> {
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            if (materia.isNotEmpty || tema.isNotEmpty || subtema.isNotEmpty)
-              Container(
-                width: double.infinity,
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE8EEF9),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  [materia, tema, subtema]
-                      .where((item) => item.isNotEmpty)
-                      .join(' • '),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1E3A8A),
-                  ),
-                ),
-              ),
-            Expanded(
-              child: Card(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                elevation: 4,
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Center(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            mostrarResposta ? resposta : pergunta,
-                            style: const TextStyle(fontSize: 18),
-                            textAlign: TextAlign.center,
-                          ),
-                          if (mostrarResposta && explicacao.isNotEmpty) ...[
-                            const SizedBox(height: 20),
-                            const Divider(),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'Explicação',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1E3A8A),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              explicacao,
-                              style: const TextStyle(fontSize: 15),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    mostrarResposta = !mostrarResposta;
-                  });
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1E3A8A),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                child: Text(
-                  mostrarResposta ? 'Ver pergunta' : 'Ver resposta',
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: indexAtual > 0 ? voltarCard : null,
-                    child: const Text('Anterior'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: proximoCard,
-                    child: const Text('Próximo'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+      body: body,
     );
   }
 }

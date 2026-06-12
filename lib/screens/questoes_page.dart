@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../services/questao_service.dart';
 import '../core/analytics/analytics_events.dart';
 import '../core/analytics/analytics_feature_tracker.dart';
+import '../application/platform/platform_registry.dart';
+import '../models/access_usage_stats.dart';
 import '../widgets/questao_card.dart';
 import 'login_page.dart';
 
@@ -72,6 +74,13 @@ class _QuestoesPageState extends State<QuestoesPage> with AnalyticsFeatureTracke
   }
 
   bool get _isMobileLayout => MediaQuery.sizeOf(context).shortestSide < 600;
+
+  Future<ConsumeResult> _onBeforeAnswer(String questionId) {
+    return PlatformRegistry.instance.contentAccess.tryConsumeQuestion(
+      userId: widget.userId,
+      questionId: questionId,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -172,6 +181,7 @@ class _QuestoesPageState extends State<QuestoesPage> with AnalyticsFeatureTracke
                 return QuestaoCard(
                   questao: questoes[index],
                   userId: widget.userId,
+                  onBeforeAnswer: _onBeforeAnswer,
                 );
               },
             );
@@ -197,6 +207,7 @@ class _QuestoesPageState extends State<QuestoesPage> with AnalyticsFeatureTracke
                             questao: questoes[index],
                             userId: widget.userId,
                             showNextButton: index < questoes.length - 1,
+                            onBeforeAnswer: _onBeforeAnswer,
                             onNext: () {
                               _pageController.nextPage(
                                 duration: const Duration(milliseconds: 250),

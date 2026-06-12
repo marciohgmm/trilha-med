@@ -35,11 +35,18 @@ Pasta: `functions/`
 
 **Região:** `southamerica-east1`
 
+**Configuração do webhook (URL única, assinatura, checklist):** [MERCADOPAGO_WEBHOOK_CONFIG.md](./MERCADOPAGO_WEBHOOK_CONFIG.md)
+
 ### Secrets / params
+
+Confirme a URL publicada com `firebase functions:list --project revalida-cards` antes de definir o param (ver [MERCADOPAGO_WEBHOOK_CONFIG.md](./MERCADOPAGO_WEBHOOK_CONFIG.md)).
 
 ```bash
 firebase functions:secrets:set MERCADOPAGO_ACCESS_TOKEN
-firebase functions:params:set MERCADOPAGO_WEBHOOK_URL="https://southamerica-east1-revalida-cards.cloudfunctions.net/mercadopagoWebhook"
+firebase functions:secrets:set MERCADOPAGO_WEBHOOK_SECRET
+# MERCADOPAGO_WEBHOOK_URL = URL HTTPS publicada de mercadopagoWebhook (não assumir sem list)
+firebase functions:params:set MERCADOPAGO_WEBHOOK_URL="SUA_URL_PUBLICADA"
+firebase functions:params:set MERCADOPAGO_WEBHOOK_SKIP_SIGNATURE=false
 firebase functions:params:set APP_CHECKOUT_SUCCESS_URL="https://revalida-cards.web.app/checkout/success"
 firebase functions:params:set APP_CHECKOUT_FAILURE_URL="https://revalida-cards.web.app/checkout/failure"
 firebase functions:params:set APP_CHECKOUT_PENDING_URL="https://revalida-cards.web.app/checkout/pending"
@@ -144,10 +151,13 @@ Campos escritos pela Function:
 
 ## 8. Configuração Mercado Pago (painel)
 
+Ver guia detalhado: [MERCADOPAGO_WEBHOOK_CONFIG.md](./MERCADOPAGO_WEBHOOK_CONFIG.md)
+
 1. Criar aplicação em [Mercado Pago Developers](https://www.mercadopago.com.br/developers)
-2. Obter **Access Token** de produção/teste
-3. Configurar **Webhooks** → URL da function `mercadopagoWebhook`
-4. Eventos: `payment` (created/updated)
+2. Obter **Access Token** de produção/teste → `MERCADOPAGO_ACCESS_TOKEN`
+3. **Webhooks** → URL = mesma URL publicada confirmada com `firebase functions:list` (ver guia webhook)
+4. Copiar **secret** do webhook → `MERCADOPAGO_WEBHOOK_SECRET` (Firebase)
+5. Eventos: `payment` (created/updated)
 
 ---
 

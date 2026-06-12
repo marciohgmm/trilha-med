@@ -1,3 +1,6 @@
+import '../../application/admin/admin_access_service.dart';
+import '../access/app_access_service.dart';
+import '../access/content_access_service.dart';
 import '../analytics/analytics_dashboard_service.dart';
 import '../push/push_campaign_admin_service.dart';
 import '../../infrastructure/firestore/platform/firestore_platform_repositories.dart';
@@ -32,12 +35,26 @@ class PlatformRegistry {
   MercadoPagoCheckoutService? _mercadoPagoCheckout;
   AdvertisingCampaignService? _advertisingCampaigns;
   AdCampaignAdminService? _adCampaignAdmin;
+  AppAccessService? _appAccess;
+  ContentAccessService? _contentAccess;
 
   FirestorePlatformRepositories get repositories =>
       _repos ??= FirestorePlatformRepositories();
 
   PlatformAuditService get audit =>
       _audit ??= PlatformAuditService(repositories.auditLogs);
+
+  /// Gratuito vs premium (Firestore `app_access_config` + assinatura).
+  AppAccessService get appAccess => _appAccess ??= AppAccessService(
+        commercialAccess: commercialAccess,
+      );
+
+  /// Limites P0 — flashcards/questões no gratuito.
+  ContentAccessService get contentAccess => _contentAccess ??=
+      ContentAccessService(
+        commercialAccess: commercialAccess,
+        adminAccess: AdminAccessService.instance,
+      );
 
   /// Acesso comercial do aluno (assinatura + entitlements).
   CommercialAccessService get commercialAccess => _commercialAccess ??=
@@ -107,5 +124,7 @@ class PlatformRegistry {
     _mercadoPagoCheckout = null;
     _advertisingCampaigns = null;
     _adCampaignAdmin = null;
+    _appAccess = null;
+    _contentAccess = null;
   }
 }

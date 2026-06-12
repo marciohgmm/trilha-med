@@ -35,6 +35,10 @@ abstract final class MedicalToolsTheme {
 /// IDs estáveis para histórico e navegação.
 abstract final class MedicalToolIds {
   static const adultBmi = 'adult_bmi';
-  static const weightDose = 'weight_dose';
+  static const pediatricBmi = 'pediatric_bmi';
+  static const burnsRuleOfNine = 'burns_rule_of_nine';
   static const cockcroftGault = 'cockcroft_gault';
+  static const obstetricDating = 'obstetric_dating';
+  static const bodySurfaceArea = 'body_surface_area';
+  static const parklandRule = 'parkland_rule';
 }

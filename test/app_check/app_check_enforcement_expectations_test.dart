@@ -47,15 +47,8 @@ void main() {
       expect(content, isNot(contains('enforceAppCheck: true')));
     });
 
-    test('Mercado Pago checkout — consumeAppCheckToken', () {
-      expectFileContains(
-        'createCheckout.ts',
-        'consumeAppCheckToken: true',
-      );
-      expectFileContains(
-        'subscription/paymentReconciliation.ts',
-        'consumeAppCheckToken: true',
-      );
+    test('callableOptions — invoker public para protocolo callable', () {
+      expectFileContains('callableOptions.ts', 'invoker: "public"');
     });
 
     test('deleteMyAccount protegido', () {

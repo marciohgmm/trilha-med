@@ -49,10 +49,21 @@ class SubscriptionPlan implements FirestoreEntity {
               ?.map((e) => e.toString())
               .toList() ??
           const [],
-      isActive: d['isActive'] as bool? ?? true,
+      isActive: _parseBool(d['isActive'], defaultValue: true),
       sortOrder: (d['sortOrder'] as num?)?.toInt() ?? 0,
       createdAt: FirestoreDates.from(d['createdAt']),
     );
+  }
+
+  static bool _parseBool(dynamic value, {required bool defaultValue}) {
+    if (value is bool) return value;
+    if (value is String) {
+      final lower = value.trim().toLowerCase();
+      if (lower == 'true' || lower == '1') return true;
+      if (lower == 'false' || lower == '0') return false;
+    }
+    if (value is num) return value != 0;
+    return defaultValue;
   }
 
   @override

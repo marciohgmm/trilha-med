@@ -670,6 +670,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /app_access_config/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isAppAdmin();
+      allow delete: if false;
+    }
+
     match /platform_audit_logs/{logId} {
       allow read: if isAppAdmin();
       // Append-only: Admin SDK (Functions) ou painel admin autenticado.

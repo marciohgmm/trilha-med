@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 
 import '../../../application/platform/platform_registry.dart';
-
+import '../../../core/commercial/commercial_entitlement.dart';
 import '../../../domain/platform/models/subscription_plan.dart';
 
 import '../../../widgets/master_admin/master_admin_commercial_forms.dart';
@@ -118,6 +118,8 @@ class MasterAdminPlansPage extends StatelessWidget {
 
                   '${p.description}\n'
 
+                  'ID Firestore: ${p.id}\n'
+
                   'Mensal: ${brl(p.priceMonthly)} · Anual: ${brl(p.priceYearly)}\n'
 
                   'Tier: ${p.tier.label}',
@@ -146,6 +148,10 @@ class MasterAdminPlansPage extends StatelessWidget {
 
                           await _savePlan(context, p);
 
+                        } else if (action == 'activate') {
+
+                          await _activateForSale(context, p);
+
                         } else if (action == 'delete') {
 
                           await _deletePlan(context, p);
@@ -154,11 +160,21 @@ class MasterAdminPlansPage extends StatelessWidget {
 
                       },
 
-                      itemBuilder: (_) => const [
+                      itemBuilder: (_) => [
 
-                        PopupMenuItem(value: 'edit', child: Text('Editar')),
+                        const PopupMenuItem(value: 'edit', child: Text('Editar')),
 
-                        PopupMenuItem(value: 'delete', child: Text('Excluir')),
+                        if (!p.isActive)
+
+                          const PopupMenuItem(
+
+                            value: 'activate',
+
+                            child: Text('Ativar para venda no app'),
+
+                          ),
+
+                        const PopupMenuItem(value: 'delete', child: Text('Excluir')),
 
                       ],
 
@@ -219,6 +235,41 @@ class MasterAdminPlansPage extends StatelessWidget {
   }
 
 
+
+  Future<void> _activateForSale(BuildContext context, SubscriptionPlan plan) async {
+    try {
+      await PlatformRegistry.instance.repositories.subscriptionPlans.save(
+        SubscriptionPlan(
+          id: plan.id,
+          name: plan.name,
+          description: plan.description,
+          priceMonthly: plan.priceMonthly,
+          priceYearly: plan.priceYearly,
+          currency: plan.currency,
+          featureKeys: plan.featureKeys,
+          tier: PlanTier.premium,
+          benefitLabels: plan.benefitLabels,
+          isActive: true,
+          sortOrder: plan.sortOrder,
+        ),
+      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Plano "${plan.name}" ativo (ID: ${plan.id}). Alunos já podem comprar.',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao ativar: $e')),
+        );
+      }
+    }
+  }
 
   Future<void> _deletePlan(BuildContext context, SubscriptionPlan plan) async {
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/permissions/app_permission.dart';
+import 'modules/app_access_config_admin_page.dart';
 import 'modules/feature_flags_admin_page.dart';
 import 'modules/master_admin_ads_page.dart';
 import 'modules/master_admin_affiliates_page.dart';
@@ -166,6 +167,14 @@ class MasterAdminDestinations {
       permissionKey: AppPermission.featureFlagsManage.key,
       routeName: 'master.feature_flags',
       pageBuilder: () => const FeatureFlagsAdminPage(),
+    ),
+    MasterAdminDestination(
+      id: 'access_config',
+      label: 'Gratuito vs Premium',
+      icon: Icons.lock_open_outlined,
+      permissionKey: AppPermission.platformSettings.key,
+      routeName: 'master.access_config',
+      pageBuilder: () => const AppAccessConfigAdminPage(),
     ),
     MasterAdminDestination(
       id: 'audit',

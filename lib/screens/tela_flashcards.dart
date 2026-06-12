@@ -13,6 +13,7 @@ import 'package:flutter_application_1/widgets/flashcard_readonly_quill.dart';
 import 'package:flutter_application_1/services/flashcard_study_daily_store.dart';
 import 'package:flutter_application_1/utils/flashcard_study_order.dart';
 
+import '../widgets/access/content_access_flashcard_gate.dart';
 import 'cronograma_page.dart';
 import 'questoes_page.dart';
 import '../services/study_timer_service.dart';
@@ -1053,7 +1054,10 @@ class _TelaFlashcardsState extends State<TelaFlashcards> with WidgetsBindingObse
                 final indiceCard =
                     (_vistosAoMenosUmaVez.length + 1).clamp(1, docs.length);
 
-                return Column(
+                return ContentAccessFlashcardGate(
+                  userId: widget.userId,
+                  cardId: cardId,
+                  child: Column(
                   children: [
                     Expanded(
                       child: SingleChildScrollView(
@@ -1347,6 +1351,7 @@ class _TelaFlashcardsState extends State<TelaFlashcards> with WidgetsBindingObse
                         ),
                       ),
                   ],
+                ),
                 );
               },
             ),

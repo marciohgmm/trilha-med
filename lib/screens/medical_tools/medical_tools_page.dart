@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 
 import 'adult_bmi_calculator_page.dart';
+import 'body_surface_area_calculator_page.dart';
 import 'cockcroft_gault_calculator_page.dart';
-import 'weight_dose_calculator_page.dart';
+import 'obstetric_dating_calculator_page.dart';
+import 'pediatric_bmi_calculator_page.dart';
+import 'burns_rule_of_nine_page.dart';
+import 'parkland_calculator_page.dart';
 
 /// Ferramentas clínicas e bulário.
 class MedicalToolsPage extends StatelessWidget {
@@ -20,19 +24,22 @@ class MedicalToolsPage extends StatelessWidget {
     _MedicalToolItem(
       title: 'IMC Pediátrico',
       icon: Icons.child_care_outlined,
-    ),
-    _MedicalToolItem(
-      title: 'Cálculo de Dose por Peso',
-      icon: Icons.medication_outlined,
       available: true,
     ),
     _MedicalToolItem(
-      title: 'Correção de Idade Gestacional',
-      icon: Icons.pregnant_woman_outlined,
+      title: 'Queimaduras – Regra dos 9',
+      icon: Icons.local_fire_department_outlined,
+      available: true,
     ),
     _MedicalToolItem(
-      title: 'Superfície Corporal (SC)',
+      title: 'Data Provável do Parto (DPP) e Idade Gestacional',
+      icon: Icons.pregnant_woman_outlined,
+      available: true,
+    ),
+    _MedicalToolItem(
+      title: 'Superfície Corporal (ASC)',
       icon: Icons.accessibility_new_outlined,
+      available: true,
     ),
     _MedicalToolItem(
       title: 'Regra de Parkland',
@@ -80,14 +87,27 @@ class MedicalToolsPage extends StatelessWidget {
     if (item.available) {
       final page = switch (item.title) {
         'IMC Adulto' => const AdultBmiCalculatorPage(),
-        'Cálculo de Dose por Peso' => const WeightDoseCalculatorPage(),
+        'IMC Pediátrico' => const PediatricBmiCalculatorPage(),
+        'Queimaduras – Regra dos 9' => const BurnsRuleOfNinePage(),
         'Clearance de Creatinina (Cockcroft-Gault)' =>
           const CockcroftGaultCalculatorPage(),
+        'Data Provável do Parto (DPP) e Idade Gestacional' =>
+          const ObstetricDatingCalculatorPage(),
+        'Superfície Corporal (ASC)' =>
+          const BodySurfaceAreaCalculatorPage(),
+        'Regra de Parkland' => const ParklandCalculatorPage(),
         _ => null,
       };
       if (page != null) {
         Navigator.of(context).push(
           MaterialPageRoute<void>(builder: (_) => page),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${item.title} — rota não configurada'),
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
       return;
@@ -129,7 +149,7 @@ class MedicalToolsPage extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'Calculadoras e bulário para apoio à prática clínica. '
-                    'IMC, dose por peso e Cockcroft-Gault já disponíveis.',
+                    'IMC, DPP, ASC, queimaduras, Parkland e Cockcroft-Gault já disponíveis.',
                     style: TextStyle(
                       fontSize: 14,
                       height: 1.4,

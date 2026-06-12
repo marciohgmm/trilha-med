@@ -11,7 +11,10 @@ import {
   PAYMENT_PROVIDER,
   PAYMENT_STATUS,
 } from "./constants";
-import { resolveCouponId } from "./subscriptionService";
+import {
+  buildAppliedCouponPricing,
+  resolveValidatedCoupon,
+} from "./subscription/couponPricing";
 import { logSubscription } from "./subscription/subscriptionLogger";
 import { appCheckCallableOptions } from "./callableOptions";
 import { assertRateLimitForCallable } from "./rateLimit/assertRateLimit";
@@ -26,12 +29,13 @@ interface CheckoutRequest {
 }
 
 export const createMercadoPagoCheckout = onCall(
-  appCheckCallableOptions(
-    { secrets: [mercadoPagoAccessToken] },
-    { consumeAppCheckToken: true },
-  ),
+  appCheckCallableOptions({ secrets: [mercadoPagoAccessToken] }),
   async (request) => {
     if (!request.auth?.uid) {
+      console.warn(
+        "[createMercadoPagoCheckout] request.auth ausente — " +
+          "verifique token Firebase Auth no cliente (região southamerica-east1).",
+      );
       throw new HttpsError("unauthenticated", "Login necessário.");
     }
 
@@ -57,18 +61,24 @@ export const createMercadoPagoCheckout = onCall(
     }
 
     const plan = planSnap.data()!;
-    const amount =
+    const baseAmount =
       billingPeriod === "yearly"
         ? (plan.priceYearly as number) ?? 0
         : (plan.priceMonthly as number) ?? 0;
 
-    if (amount <= 0) {
+    if (baseAmount <= 0) {
       throw new HttpsError("failed-precondition", "Plano sem preço configurado.");
     }
 
     const userId = request.auth.uid;
     const userEmail = request.auth.token.email ?? undefined;
-    const couponId = await resolveCouponId(data.couponCode);
+
+    const coupon = await resolveValidatedCoupon(data.couponCode, planId);
+    const pricing = coupon
+      ? buildAppliedCouponPricing(baseAmount, coupon)
+      : null;
+    const amount = pricing?.finalAmount ?? baseAmount;
+    const couponId = pricing?.couponId ?? null;
 
     const paymentRef = db.collection(COLLECTIONS.payments).doc();
     const now = admin.firestore.FieldValue.serverTimestamp();
@@ -87,6 +97,13 @@ export const createMercadoPagoCheckout = onCall(
         billingPeriod,
         planName: plan.name,
         couponCode: data.couponCode?.trim().toUpperCase() ?? null,
+        ...(pricing
+          ? {
+              originalAmount: pricing.originalAmount,
+              discountType: pricing.discountType,
+              discountValue: pricing.discountValue,
+            }
+          : {}),
       },
       createdAt: now,
       updatedAt: now,
@@ -98,11 +115,20 @@ export const createMercadoPagoCheckout = onCall(
     const urls = getCheckoutUrls();
 
     const periodLabel = billingPeriod === "yearly" ? "Anual" : "Mensal";
+    const discountLabel = pricing
+      ? pricing.discountType === "percent"
+        ? ` (-${pricing.discountValue}%)`
+        : ` (-R$ ${pricing.discountValue.toFixed(2).replace(".", ",")})`
+      : "";
+
     logSubscription("checkout.creating_preference", {
       paymentId: paymentRef.id,
       userId,
       planId,
       hasNotificationUrl: Boolean(notificationUrl),
+      originalAmount: pricing?.originalAmount ?? baseAmount,
+      finalAmount: amount,
+      couponId: couponId ?? null,
     });
 
     const preference = await preferenceClient.create({
@@ -110,7 +136,7 @@ export const createMercadoPagoCheckout = onCall(
         items: [
           {
             id: planId,
-            title: `${plan.name} — ${periodLabel}`,
+            title: `${plan.name} — ${periodLabel}${discountLabel}`,
             description: (plan.description as string) ?? "",
             quantity: 1,
             unit_price: amount,
@@ -169,6 +195,13 @@ export const createMercadoPagoCheckout = onCall(
       amount,
       currency: "BRL",
       billingPeriod,
+      ...(pricing
+        ? {
+            originalAmount: pricing.originalAmount,
+            discountApplied: pricing.originalAmount - pricing.finalAmount,
+            couponCode: pricing.couponCode,
+          }
+        : {}),
     };
   }
 );

@@ -33,6 +33,20 @@
 
   <title>Trilha Med</title>
   <link rel="manifest" href="manifest.json">
+
+  <!--
+    Firebase App Check (Web) — site keys reCAPTCHA.
+    Obtenha em: Firebase Console → App Check → seu app Web → reCAPTCHA v3 / Enterprise.
+
+    Alternativa preferida em dev: passe no flutter run:
+      --dart-define=RECAPTCHA_V3_SITE_KEY=SUA_SITE_KEY
+
+    Se deixar vazio aqui, use obrigatoriamente --dart-define.
+  -->
+  <script>
+    window.TRILHA_MED_RECAPTCHA_V3_SITE_KEY = '';
+    window.TRILHA_MED_RECAPTCHA_ENTERPRISE_SITE_KEY = '';
+  </script>
 </head>
 <body>
   <!--

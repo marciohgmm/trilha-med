@@ -1,5 +1,9 @@
 import { defineSecret, defineString } from "firebase-functions/params";
 import { HttpsError } from "firebase-functions/v2/https";
+import {
+  auditMercadoPagoWebhookConfig,
+  warnCheckoutWebhookUrlIfInconsistent,
+} from "./mercadoPagoRuntimeConfig";
 import { logSubscription } from "./subscription/subscriptionLogger";
 
 export const mercadoPagoAccessToken = defineSecret("MERCADOPAGO_ACCESS_TOKEN");
@@ -7,16 +11,23 @@ export const mercadoPagoAccessToken = defineSecret("MERCADOPAGO_ACCESS_TOKEN");
 /** Secret de assinatura do painel MP (Webhooks → secret signature). */
 export const mercadoPagoWebhookSecret = defineSecret("MERCADOPAGO_WEBHOOK_SECRET");
 
-/** Somente dev/emulador — nunca em produção. */
+/**
+ * Somente emulador/dev local. Em produção (revalida-cards) o skip é ignorado
+ * e x-signature permanece obrigatório — ver shouldSkipMercadoPagoWebhookSignature().
+ */
 export const mercadoPagoWebhookSkipSignature = defineString(
   "MERCADOPAGO_WEBHOOK_SKIP_SIGNATURE",
   {
     default: "false",
     description:
-      "Se 'true', ignora validação x-signature (somente desenvolvimento)",
+      "Se 'true', ignora x-signature apenas no emulador ou fora de produção",
   }
 );
 
+/**
+ * URL única usada em notification_url (checkout) e no painel Mercado Pago.
+ * Deve ser a URL publicada (firebase functions:list) — ver docs/MERCADOPAGO_WEBHOOK_CONFIG.md
+ */
 export const mercadoPagoWebhookUrl = defineString("MERCADOPAGO_WEBHOOK_URL", {
   default: "",
   description:
@@ -55,6 +66,10 @@ export function getMercadoPagoWebhookUrl(): string {
  */
 export function assertMercadoPagoCheckoutConfig(): string {
   const webhookUrl = getMercadoPagoWebhookUrl();
+  auditMercadoPagoWebhookConfig({
+    webhookUrl,
+    skipParamValue: mercadoPagoWebhookSkipSignature.value(),
+  });
   const allowWithout =
     mercadoPagoAllowCheckoutWithoutWebhook.value().trim().toLowerCase() ===
     "true";
@@ -83,13 +98,17 @@ export function assertMercadoPagoCheckoutConfig(): string {
     throw new HttpsError(
       "failed-precondition",
       "MERCADOPAGO_WEBHOOK_URL não configurada. " +
-        "Defina a URL pública do webhook mercadopagoWebhook no painel Firebase " +
-        "e no parâmetro MERCADOPAGO_WEBHOOK_URL antes de aceitar pagamentos."
+        "Defina a URL canônica do mercadopagoWebhook (ver docs/MERCADOPAGO_WEBHOOK_CONFIG.md) " +
+        "no Firebase e no painel Mercado Pago antes de aceitar pagamentos."
     );
   }
 
   if (!webhookUrl && allowWithout) {
     logSubscription("checkout.webhook_url_skipped_dev", {});
+  }
+
+  if (webhookUrl) {
+    warnCheckoutWebhookUrlIfInconsistent(webhookUrl);
   }
 
   return webhookUrl;

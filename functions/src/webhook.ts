@@ -1,10 +1,15 @@
 import { onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import {
+  getMercadoPagoWebhookUrl,
   mercadoPagoAccessToken,
   mercadoPagoWebhookSecret,
   mercadoPagoWebhookSkipSignature,
 } from "./config";
+import {
+  auditMercadoPagoWebhookConfig,
+  shouldSkipMercadoPagoWebhookSignature,
+} from "./mercadoPagoRuntimeConfig";
 import { expireDueSubscriptions } from "./subscriptionService";
 import { processMercadoPagoPaymentById } from "./subscription/paymentProcessor";
 import { validateMercadoPagoWebhookSignature } from "./subscription/mercadoPagoWebhookAuth";
@@ -51,6 +56,12 @@ export const mercadopagoWebhook = onRequest(
       return;
     }
 
+    const skipParamValue = mercadoPagoWebhookSkipSignature.value();
+    auditMercadoPagoWebhookConfig({
+      webhookUrl: getMercadoPagoWebhookUrl(),
+      skipParamValue,
+    });
+
     const paymentIdFromQuery = extractPaymentIdFromWebhook(req);
 
     try {
@@ -71,8 +82,7 @@ export const mercadopagoWebhook = onRequest(
         return;
       }
 
-      const skipSignature =
-        mercadoPagoWebhookSkipSignature.value().trim().toLowerCase() === "true";
+      const skipSignature = shouldSkipMercadoPagoWebhookSignature(skipParamValue);
 
       if (!skipSignature) {
         const xSignature = headerString(

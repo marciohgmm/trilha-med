@@ -1,7 +1,11 @@
-import '../../core/commercial/commercial_entitlement.dart';
-import '../../domain/platform/models/subscription_plan.dart';
+import '../core/commercial/commercial_entitlement.dart';
+import '../domain/platform/models/subscription_plan.dart';
+import '../models/app_access_config_model.dart';
+import 'commercial_plan_presentation.dart';
 
 /// Catálogo estático do plano gratuito + benefícios padrão para comparação.
+///
+/// Preços reais vêm de `platform_subscription_plans` (Firestore / Painel Mestre).
 class CommercialPlanCatalog {
   CommercialPlanCatalog._();
 
@@ -25,6 +29,7 @@ class CommercialPlanCatalog {
         ],
       );
 
+  /// Extras além do gratuito (não repetir "Tudo do plano Gratuito" na tabela).
   static const defaultPremiumBenefits = [
     'Tudo do plano Gratuito',
     'Simulados premium (quando ativados)',
@@ -34,11 +39,35 @@ class CommercialPlanCatalog {
     'Suporte prioritário',
   ];
 
+  /// Lista para cards — gratuito usa só benefícios free; premium usa merge.
   static List<String> benefitsForPlan(SubscriptionPlan? plan) {
     if (plan == null || plan.tier == PlanTier.free) {
-      return freePlan.benefitLabels;
+      return CommercialPlanPresentation.freeCardBenefits();
     }
-    if (plan.benefitLabels.isNotEmpty) return plan.benefitLabels;
-    return defaultPremiumBenefits;
+    return CommercialPlanPresentation.premiumCardBenefits(plan);
+  }
+
+  /// Tabela comparativa corrigida (Premium inclui benefícios do Gratuito).
+  static List<PlanBenefitComparisonRow> comparisonForPremium(
+    SubscriptionPlan? premiumPlan,
+  ) {
+    return CommercialPlanPresentation.buildComparisonRows(premiumPlan);
+  }
+
+  /// Preferência: config do admin; senão benefícios do plano no Firestore.
+  static List<PlanBenefitComparisonRow> comparisonForDisplay({
+    AppAccessConfigModel? accessConfig,
+    SubscriptionPlan? premiumPlan,
+  }) {
+    if (accessConfig != null) {
+      return CommercialPlanPresentation.buildComparisonFromAccessConfig(
+        accessConfig,
+      );
+    }
+    return comparisonForPremium(premiumPlan);
+  }
+
+  static PremiumPricingDisplay pricingFor(SubscriptionPlan plan) {
+    return PremiumPricingDisplay.fromPlan(plan);
   }
 }

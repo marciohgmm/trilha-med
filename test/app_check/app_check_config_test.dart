@@ -1,4 +1,5 @@
 import 'package:flutter_application_1/core/app_check/app_check_config.dart';
+import 'package:flutter_application_1/core/app_check/app_check_web_runtime.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -12,14 +13,29 @@ void main() {
       expect(AppCheckConfig.debugDefine, isA<bool>());
     });
 
-    test('resolveWebProvider em VM de teste não é web — retorna null', () {
+    test('resolveWebProvider em VM de teste não é web — lança', () {
       final config = AppCheckConfig.fromEnvironment();
-      expect(config.resolveWebProvider(), isNull);
+      final runtime = AppCheckWebRuntimeKeys.resolve(config);
+      expect(
+        () => config.resolveWebProvider(useDebug: false, runtime: runtime),
+        throwsStateError,
+      );
     });
 
     test('produção segura não lança em test harness', () {
       final config = AppCheckConfig.fromEnvironment();
       expect(() => config.assertProductionSafe(), returnsNormally);
+    });
+
+    test('edgeDebugRunHint inclui RECAPTCHA_V3_SITE_KEY', () {
+      expect(
+        AppCheckWebRuntimeKeys.edgeDebugRunHint(),
+        contains('RECAPTCHA_V3_SITE_KEY'),
+      );
+      expect(
+        AppCheckWebRuntimeKeys.edgeDebugRunHint(),
+        contains('APP_CHECK_DEBUG=true'),
+      );
     });
   });
 }

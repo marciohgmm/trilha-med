@@ -18,7 +18,8 @@ enum AuditEventType {
   permissionChanged('permission.changed'),
   accessGranted('access.granted'),
   accessDenied('access.denied'),
-  featureFlagUpdated('feature_flag.updated');
+  featureFlagUpdated('feature_flag.updated'),
+  accessConfigUpdated('access_config.updated');
 
   final String key;
   const AuditEventType(this.key);

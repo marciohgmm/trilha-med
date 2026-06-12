@@ -57,6 +57,14 @@
       ]
     },
     {
+      "collectionGroup": "platform_subscription_plans",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "sortOrder", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "platform_ad_campaigns",
       "queryScope": "COLLECTION",
       "fields": [

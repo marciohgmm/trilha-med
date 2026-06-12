@@ -11,8 +11,39 @@ import '../../widgets/commercial/commercial_status_chip.dart';
 import 'plans_page.dart';
 
 /// Tela "Minha Assinatura" — plano, datas, status e rastreamento comercial.
-class MySubscriptionPage extends StatelessWidget {
+class MySubscriptionPage extends StatefulWidget {
   const MySubscriptionPage({super.key});
+
+  @override
+  State<MySubscriptionPage> createState() => _MySubscriptionPageState();
+}
+
+class _MySubscriptionPageState extends State<MySubscriptionPage> {
+  bool _refreshingStatus = false;
+
+  Future<void> _refreshPaymentStatus() async {
+    if (_refreshingStatus) return;
+    setState(() => _refreshingStatus = true);
+    try {
+      await PlatformRegistry.instance.mercadoPagoCheckout.reconcileMyPayments();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Status atualizado. Se o pagamento foi aprovado, o Premium aparecerá em instantes.'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Não foi possível atualizar: $e'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _refreshingStatus = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +68,22 @@ class MySubscriptionPage extends StatelessWidget {
         title: const Text('Minha Assinatura'),
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            tooltip: 'Atualizar status',
+            onPressed: _refreshingStatus ? null : _refreshPaymentStatus,
+            icon: _refreshingStatus
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.refresh),
+          ),
+        ],
       ),
       body: StreamBuilder<List<Subscription>>(
         stream: subscriptions.watchForUser(user.uid, limit: 15),
@@ -79,7 +126,13 @@ class MySubscriptionPage extends StatelessWidget {
                     const SizedBox(height: 16),
                     _EntitlementsCard(access: access),
                   ],
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: _refreshingStatus ? null : _refreshPaymentStatus,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Atualizar status'),
+                  ),
+                  const SizedBox(height: 12),
                   OutlinedButton.icon(
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const PlansPage()),

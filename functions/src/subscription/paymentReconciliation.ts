@@ -54,10 +54,7 @@ export const reconcileMercadoPagoPaymentsScheduled = onSchedule(
 
 /** Callable: usuário autenticado reconcilia seus pagamentos recentes (pós-checkout). */
 export const reconcileMyMercadoPagoPayments = onCall(
-  appCheckCallableOptions(
-    { secrets: [mercadoPagoAccessToken] },
-    { consumeAppCheckToken: true },
-  ),
+  appCheckCallableOptions({ secrets: [mercadoPagoAccessToken] }),
   async (request) => {
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "Login necessário.");

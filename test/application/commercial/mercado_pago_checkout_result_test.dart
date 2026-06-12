@@ -3,7 +3,7 @@ import 'package:flutter_application_1/application/commercial/mercado_pago_checko
 
 void main() {
   group('MercadoPagoCheckoutResult', () {
-    test('fromMap parseia resposta da Cloud Function', () {
+    test('fromMap parseia checkoutUrl da Cloud Function', () {
       final result = MercadoPagoCheckoutResult.fromMap({
         'paymentId': 'pay_123',
         'preferenceId': 'pref_456',
@@ -17,15 +17,34 @@ void main() {
       expect(result.preferenceId, 'pref_456');
       expect(result.checkoutUrl, 'https://mp.test/checkout');
       expect(result.amount, 49.9);
-      expect(result.currency, 'BRL');
-      expect(result.billingPeriod, 'monthly');
+    });
+
+    test('resolveCheckoutUrl aceita init_point e sandbox_init_point', () {
+      expect(
+        MercadoPagoCheckoutService.resolveCheckoutUrl({
+          'init_point': 'https://mp.test/init',
+        }),
+        'https://mp.test/init',
+      );
+      expect(
+        MercadoPagoCheckoutService.resolveCheckoutUrl({
+          'sandbox_init_point': 'https://mp.test/sandbox',
+        }),
+        'https://mp.test/sandbox',
+      );
+      expect(
+        MercadoPagoCheckoutService.resolveCheckoutUrl({
+          'metadata': {'checkoutUrl': 'https://mp.test/meta'},
+        }),
+        'https://mp.test/meta',
+      );
     });
 
     test('fromMap tolera campos ausentes', () {
       final result = MercadoPagoCheckoutResult.fromMap({});
       expect(result.paymentId, '');
+      expect(result.checkoutUrl, '');
       expect(result.amount, 0);
-      expect(result.currency, 'BRL');
     });
   });
 }

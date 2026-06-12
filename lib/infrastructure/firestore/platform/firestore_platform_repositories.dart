@@ -56,13 +56,14 @@ class _SubscriptionPlanRepo implements SubscriptionPlanRepository {
 
   @override
   Stream<List<SubscriptionPlan>> watchActivePlans() {
-    return _col
-        .where('isActive', isEqualTo: true)
-        .orderBy('sortOrder')
-        .snapshots()
-        .map((s) => s.docs
-            .map((d) => SubscriptionPlan.fromDoc(d.id, d.data()))
-            .toList());
+    // Sem `where(isActive)` para evitar índice composto e docs legados sem o campo.
+    // Regras Firestore já impedem leitura de planos inativos para alunos.
+    return _col.orderBy('sortOrder').snapshots().map(
+          (s) => s.docs
+              .map((d) => SubscriptionPlan.fromDoc(d.id, d.data()))
+              .where((p) => p.isActive)
+              .toList(),
+        );
   }
 
   @override
@@ -86,6 +87,8 @@ class _SubscriptionPlanRepo implements SubscriptionPlanRepository {
     final ref = plan.id.isEmpty ? _col.doc() : _col.doc(plan.id);
     await ref.set({
       ...plan.toMap(),
+      'isActive': plan.isActive,
+      'tier': plan.tier.key,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
     return ref.id;

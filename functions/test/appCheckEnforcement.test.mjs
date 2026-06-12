@@ -50,12 +50,5 @@ test("App Check: mercadopagoWebhook permanece onRequest sem enforceAppCheck", ()
 test("App Check: helper central appCheckCallableOptions", () => {
   const src = readSrc("callableOptions.ts");
   assert.match(src, /enforceAppCheck:\s*true/);
-  assert.match(src, /consumeAppCheckToken/);
-});
-
-test("App Check: pagamentos usam consumeAppCheckToken", () => {
-  const checkout = readSrc("createCheckout.ts");
-  const reconcile = readSrc("subscription/paymentReconciliation.ts");
-  assert.match(checkout, /consumeAppCheckToken:\s*true/);
-  assert.match(reconcile, /consumeAppCheckToken:\s*true/);
+  assert.match(src, /invoker:\s*"public"/);
 });

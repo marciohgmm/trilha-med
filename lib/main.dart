@@ -11,6 +11,7 @@ import 'package:flutter_quill/flutter_quill.dart' show FlutterQuillLocalizations
 import 'app_scaffold.dart';
 import 'firebase_options.dart';
 import 'services/app_check/app_check_service.dart';
+import 'services/access/app_access_config_service.dart';
 import 'services/feature_flags/feature_flag_service.dart';
 import 'services/analytics/app_analytics_service.dart';
 import 'services/push/fcm_service.dart';
@@ -29,9 +30,20 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  await AppCheckService.instance.initialize();
+  // App Check no boot: falha não impede abrir o app (evita tela preta no APK).
+  // Checkout/callables continuam exigindo App Check via MercadoPagoCheckoutService.
+  final appCheckReady = await AppCheckService.instance.initialize();
+  if (!appCheckReady) {
+    final detail = AppCheckService.instance.lastError;
+    debugPrint(
+      '[main] App Check não ficou pronto no arranque. '
+      'O app abre normalmente; pagamento e callables protegidas podem falhar. '
+      '${detail != null ? "Detalhe: $detail. " : ""}'
+      'Release: configure Play Integrity + SHA no Firebase Console.',
+    );
+  }
 
-  unawaited(FeatureFlagService.instance.refreshCache());
+  unawaited(_refreshBootCachesSafely());
 
   // Firestore: cache em disco + modo offline (ver [configureFirestoreForOffline]).
   configureFirestoreForOffline();
@@ -57,6 +69,35 @@ Future<void> main() async {
   );
 
   runApp(const TrilhaMedApp());
+}
+
+Future<void> _refreshBootCachesSafely() async {
+  await _refreshBootCache('FeatureFlag', FeatureFlagService.instance.refreshCache);
+  await _refreshBootCache('AppAccessConfig', AppAccessConfigService.instance.refreshCache);
+}
+
+Future<void> _refreshBootCache(
+  String tag,
+  Future<void> Function() refresh,
+) async {
+  try {
+    await refresh();
+  } catch (e) {
+    if (!kDebugMode) return;
+    final lower = e.toString().toLowerCase();
+    final network = lower.contains('eai_nodata') ||
+        lower.contains('getaddrinfo') ||
+        lower.contains('unable to resolve host') ||
+        lower.contains('network') ||
+        lower.contains('permission-denied');
+    debugPrint('[$tag] refreshCache no boot falhou: $e');
+    if (network) {
+      debugPrint(
+        '[$tag] provável REDE/DNS ou App Check ainda sem token — '
+        'Firestore pode negar até internet/DNS e debug secret estarem OK',
+      );
+    }
+  }
 }
 
 /// Observa o estado de autenticação e abre login ou a área logada do app.
