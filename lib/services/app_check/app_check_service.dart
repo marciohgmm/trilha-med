@@ -72,8 +72,15 @@ class AppCheckService {
   }
 
   Future<bool> _doInitialize() async {
-    final envConfig = AppCheckConfig.fromEnvironment();
-    envConfig.assertProductionSafe();
+    AppCheckConfig envConfig;
+    try {
+      envConfig = AppCheckConfig.fromEnvironment();
+      envConfig.assertProductionSafe();
+    } catch (e) {
+      _lastError = 'Config App Check inválida: $e';
+      debugPrint('[AppCheck] ERRO config: $_lastError');
+      return false;
+    }
     _config = envConfig;
 
     if (kIsWeb) {
@@ -211,52 +218,41 @@ class AppCheckService {
     _usingDebugProvider = useDebug;
     _config = cfg;
 
-    // Debug nativo: não chamar getToken no boot — evita rate limit antes do checkout.
-    if (useDebug && !kIsWeb && kDebugMode && !kReleaseMode) {
-      _initialized = true;
-      _lastError =
-          'activate OK; getToken adiado em debug (evita rate limit no boot)';
-      debugPrint(
-        '[AppCheck] inicializado em debug (provider=${_activeProviderLabel ?? "?"}); '
-        'getToken só no checkout.',
-      );
-      logAppCheckToBrowserConsole(
-        '[AppCheck] debug: activate OK; getToken adiado',
-      );
-      return true;
-    }
+    // Nunca bloqueia o boot com getToken (debug, release, web).
+    // O token é obtido depois da UI via [warmUpTokenInBackground].
+    _initialized = true;
+    _lastError = 'activate OK; getToken adiado após UI';
+    debugPrint(
+      '[AppCheck] activate OK provider=${_activeProviderLabel ?? "?"} '
+      'debug=$useDebug — getToken adiado pós-UI',
+    );
+    logAppCheckToBrowserConsole(
+      '[AppCheck] activate OK; getToken adiado pós-UI',
+    );
+    return true;
+  }
 
-    final result = await getTokenResult(forceRefresh: false);
+  /// Obtém token App Check após [runApp] — não bloqueia abertura do app.
+  Future<void> warmUpTokenInBackground({bool forceRefresh = false}) async {
+    if (!_initialized) {
+      debugPrint('[AppCheck] warmUp ignorado: App Check não inicializado');
+      return;
+    }
+    debugPrint('[AppCheck] warmUp token (pós-UI)...');
+    final result = await getTokenResult(forceRefresh: forceRefresh);
     if (result.ok) {
-      _initialized = true;
       _lastError = null;
       final preview = result.token!.length > 16
           ? '${result.token!.substring(0, 16)}…'
           : result.token!;
-      debugPrint(
-        '[AppCheck] inicializado com sucesso provider=${_activeProviderLabel ?? "?"} '
-        'debug=$useDebug tokenPreview=$preview',
-      );
-      logAppCheckToBrowserConsole(
-        '[AppCheck] OK provider=${_activeProviderLabel ?? "?"} debug=$useDebug',
-      );
-      if (useDebug || cfg.enableDiagnosticLogs) {
-        _logAppCheckJwtPreview(result.token!, useDebug: useDebug);
+      debugPrint('[AppCheck] warmUp OK tokenPreview=$preview');
+      if (_usingDebugProvider || (_config?.enableDiagnosticLogs ?? false)) {
+        _logAppCheckJwtPreview(result.token!, useDebug: _usingDebugProvider);
       }
-      return true;
+      return;
     }
-
-    if (kReleaseMode) {
-      _lastError = result.technicalDetail ?? result.userMessage;
-      debugPrint('[AppCheck] FALHA pós-activate: $_lastError');
-      logAppCheckToBrowserConsole('[AppCheck] FALHA pós-activate: $_lastError');
-      return false;
-    }
-
-    _initialized = true;
-    _lastError = result.userMessage;
-    debugPrint('[AppCheck] inicializado com aviso: $_lastError');
-    return true;
+    _lastError = result.technicalDetail ?? result.userMessage;
+    debugPrint('[AppCheck] warmUp falhou: $_lastError');
   }
 
   /// Obtém token com cache, deduplicação e cooldown (evita "Too many attempts").

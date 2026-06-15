@@ -26,49 +26,134 @@ import 'widgets/legal/legal_acceptance_gate.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+  FlutterError.onError = (FlutterErrorDetails details) {
+    _bootLog('FlutterError: ${details.exceptionAsString()}', error: true);
+    if (kDebugMode) {
+      FlutterError.dumpErrorToConsole(details);
+    }
+  };
+
+  await runZonedGuarded(
+    () async {
+      await _bootstrapAndRunApp();
+    },
+    (Object error, StackTrace stack) {
+      _bootLog('Exceção não capturada: $error', error: true);
+      if (kDebugMode) {
+        _bootLog('$stack', error: true);
+      }
+    },
   );
+}
 
-  // App Check no boot: falha não impede abrir o app (evita tela preta no APK).
-  // Checkout/callables continuam exigindo App Check via MercadoPagoCheckoutService.
-  final appCheckReady = await AppCheckService.instance.initialize();
-  if (!appCheckReady) {
-    final detail = AppCheckService.instance.lastError;
-    debugPrint(
-      '[main] App Check não ficou pronto no arranque. '
-      'O app abre normalmente; pagamento e callables protegidas podem falhar. '
-      '${detail != null ? "Detalhe: $detail. " : ""}'
-      'Release: configure Play Integrity + SHA no Firebase Console.',
-    );
-  }
+Future<void> _bootstrapAndRunApp() async {
+  _bootLog('Iniciando bootstrap…');
 
-  unawaited(_refreshBootCachesSafely());
-
-  // Firestore: cache em disco + modo offline (ver [configureFirestoreForOffline]).
-  configureFirestoreForOffline();
-
-  await AppAnalyticsService.instance.initialize();
-
-  await FcmService.instance.initialize(navigatorKey: rootNavigatorKey);
-
-  await StudyTimerService().loadSettings();
-
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      systemNavigationBarColor: Colors.transparent,
-      systemNavigationBarDividerColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
-      systemNavigationBarIconBrightness: Brightness.dark,
-      systemStatusBarContrastEnforced: false,
-      systemNavigationBarContrastEnforced: false,
+  await _bootStep(
+    'Firebase.initializeApp',
+    () => Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
     ),
   );
 
+  final appCheckReady = await _bootStep(
+    'AppCheck.activate',
+    () => AppCheckService.instance.initialize(),
+  );
+  if (appCheckReady != true) {
+    final detail = AppCheckService.instance.lastError;
+    _bootLog(
+      'App Check não ficou pronto no boot (app abre mesmo assim). '
+      '${detail ?? "sem detalhe"}',
+      error: true,
+    );
+  }
+
+  _bootStepSync('Firestore offline cache', configureFirestoreForOffline);
+
+  await _bootStep(
+    'Analytics.initialize',
+    () => AppAnalyticsService.instance.initialize(),
+  );
+
+  await _bootStep(
+    'FCM.initialize',
+    () => FcmService.instance.initialize(navigatorKey: rootNavigatorKey),
+  );
+
+  await _bootStep(
+    'StudyTimer.loadSettings',
+    () => StudyTimerService().loadSettings(),
+  );
+
+  await _bootStep(
+    'SystemChrome',
+    () async {
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      SystemChrome.setSystemUIOverlayStyle(
+        const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          systemNavigationBarColor: Colors.transparent,
+          systemNavigationBarDividerColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark,
+          systemNavigationBarIconBrightness: Brightness.dark,
+          systemStatusBarContrastEnforced: false,
+          systemNavigationBarContrastEnforced: false,
+        ),
+      );
+    },
+  );
+
   runApp(const TrilhaMedApp());
+  _bootLog('runApp(TrilhaMedApp) — UI iniciada');
+
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(_deferredBootWork());
+  });
+}
+
+Future<void> _deferredBootWork() async {
+  _bootLog('Serviços adiados (pós-primeiro-frame)…');
+
+  await _bootStep(
+    'AppCheck.warmUpToken',
+    () => AppCheckService.instance.warmUpTokenInBackground(),
+  );
+
+  unawaited(_refreshBootCachesSafely());
+}
+
+void _bootLog(String message, {bool error = false}) {
+  final prefix = error ? '[BOOT][ERRO]' : '[BOOT]';
+  debugPrint('$prefix $message');
+}
+
+Future<T?> _bootStep<T>(String name, Future<T> Function() action) async {
+  _bootLog('$name — iniciando');
+  try {
+    final result = await action();
+    _bootLog('$name — OK');
+    return result;
+  } catch (e, st) {
+    _bootLog('$name — falhou: $e', error: true);
+    if (kDebugMode) {
+      _bootLog('$st', error: true);
+    }
+    return null;
+  }
+}
+
+void _bootStepSync(String name, void Function() action) {
+  _bootLog('$name — iniciando');
+  try {
+    action();
+    _bootLog('$name — OK');
+  } catch (e, st) {
+    _bootLog('$name — falhou: $e', error: true);
+    if (kDebugMode) {
+      _bootLog('$st', error: true);
+    }
+  }
 }
 
 Future<void> _refreshBootCachesSafely() async {
@@ -82,21 +167,9 @@ Future<void> _refreshBootCache(
 ) async {
   try {
     await refresh();
+    _bootLog('$tag.refreshCache — OK');
   } catch (e) {
-    if (!kDebugMode) return;
-    final lower = e.toString().toLowerCase();
-    final network = lower.contains('eai_nodata') ||
-        lower.contains('getaddrinfo') ||
-        lower.contains('unable to resolve host') ||
-        lower.contains('network') ||
-        lower.contains('permission-denied');
-    debugPrint('[$tag] refreshCache no boot falhou: $e');
-    if (network) {
-      debugPrint(
-        '[$tag] provável REDE/DNS ou App Check ainda sem token — '
-        'Firestore pode negar até internet/DNS e debug secret estarem OK',
-      );
-    }
+    _bootLog('$tag.refreshCache — falhou: $e', error: true);
   }
 }
 
@@ -111,6 +184,7 @@ class AuthCheck extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
+            backgroundColor: Colors.white,
             body: Center(child: CircularProgressIndicator()),
           );
         }
@@ -179,7 +253,11 @@ class TrilhaMedApp extends StatelessWidget {
               data: MediaQuery.of(context).copyWith(
                 textScaler: TextScaler.linear(scale),
               ),
-              child: child ?? const SizedBox.shrink(),
+              child: child ??
+                  const ColoredBox(
+                    color: Colors.white,
+                    child: Center(child: CircularProgressIndicator()),
+                  ),
             );
           },
           initialRoute: CheckoutRouteParser.resolveInitialRoute(),
